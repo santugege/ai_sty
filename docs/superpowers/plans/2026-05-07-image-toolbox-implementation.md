@@ -2,74 +2,1017 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Next.js image-generation toolbox that calls OpenAI image models from server-side API routes while keeping `OPENAI_API_KEY` out of the browser.
+**Goal:** Build a Next.js image toolbox website backed by a Python FastAPI service that calls OpenAI image models without exposing `OPENAI_API_KEY` to the browser.
 
-**Architecture:** The app uses a configuration-driven tool registry for four image tools, shared client form components, and one server API route for validation and OpenAI Images API calls. Unit tests cover tool configuration, request validation, and OpenAI response normalization; production build verifies the Next.js pages and route compile together.
+**Architecture:** The project is split into `frontend/` and `backend/`. The Next.js frontend renders the toolbox and submits `FormData` to the FastAPI backend; the backend validates requests, composes prompts, calls the OpenAI Python SDK, and returns stable JSON image results or errors.
 
-**Tech Stack:** Next.js App Router, TypeScript, Tailwind CSS, OpenAI Node SDK, Vitest, lucide-react.
+**Tech Stack:** Next.js App Router, TypeScript, Tailwind CSS, lucide-react, FastAPI, OpenAI Python SDK, pytest.
 
 ---
 
 ## File Structure
 
-- Create `package.json`: project metadata, scripts, runtime dependencies, and dev dependencies.
-- Create `tsconfig.json`: strict TypeScript setup for Next.js.
-- Create `next.config.ts`: Next.js configuration.
-- Create `postcss.config.mjs`: Tailwind CSS PostCSS integration.
-- Create `eslint.config.mjs`: flat ESLint configuration for Next.js and TypeScript.
-- Create `vitest.config.ts`: Vitest unit test configuration.
-- Create `.gitignore`: ignore dependencies, build output, env files, and test artifacts.
-- Create `.env.example`: document required server environment variables.
-- Create `src/app/layout.tsx`: root HTML shell and metadata.
-- Create `src/app/globals.css`: Tailwind import, theme tokens, and base styles.
-- Create `src/app/page.tsx`: toolbox homepage with four feature cards.
-- Create `src/app/tools/[toolId]/page.tsx`: dynamic tool page.
-- Create `src/components/tool-card.tsx`: reusable homepage card.
-- Create `src/components/tool-form.tsx`: client-side form, upload, submit state, result, and errors.
-- Create `src/lib/tools.ts`: typed registry for the four tools.
-- Create `src/lib/tools.test.ts`: tests for registry behavior.
-- Create `src/lib/image-request.ts`: form validation and prompt composition.
-- Create `src/lib/image-request.test.ts`: validation tests.
-- Create `src/lib/openai-images.ts`: OpenAI Images API wrapper and response normalization.
-- Create `src/lib/openai-images.test.ts`: tests for response normalization and prompt forwarding.
-- Create `src/app/api/images/generate/route.ts`: server route that validates `FormData` and calls OpenAI.
+- Create `backend/requirements.txt`: Python backend dependencies.
+- Create `backend/.env.example`: backend environment variables.
+- Create `backend/pytest.ini`: pytest discovery and import path.
+- Create `backend/app/__init__.py`: backend package marker.
+- Create `backend/app/tools.py`: backend tool registry.
+- Create `backend/app/image_request.py`: request validation and prompt composition.
+- Create `backend/app/openai_images.py`: OpenAI image API wrapper.
+- Create `backend/app/main.py`: FastAPI app, CORS, health route, and image route.
+- Create `backend/tests/test_tools.py`: backend tool registry tests.
+- Create `backend/tests/test_image_request.py`: validation tests.
+- Create `backend/tests/test_openai_images.py`: OpenAI wrapper tests.
+- Create `backend/tests/test_main.py`: FastAPI route tests.
+- Create `frontend/package.json`: frontend project metadata and scripts.
+- Create `frontend/tsconfig.json`: strict TypeScript setup for Next.js.
+- Create `frontend/next.config.ts`: Next.js configuration.
+- Create `frontend/postcss.config.mjs`: Tailwind CSS PostCSS integration.
+- Create `frontend/eslint.config.mjs`: flat ESLint configuration.
+- Create `frontend/.env.example`: frontend API base URL.
+- Create `frontend/src/app/layout.tsx`: root HTML shell and metadata.
+- Create `frontend/src/app/globals.css`: Tailwind import, theme tokens, and base styles.
+- Create `frontend/src/lib/tools.ts`: frontend display registry.
+- Create `frontend/src/components/tool-card.tsx`: reusable homepage card.
+- Create `frontend/src/components/tool-form.tsx`: client-side form, upload, submit state, result, and errors.
+- Create `frontend/src/app/page.tsx`: toolbox homepage.
+- Create `frontend/src/app/tools/[toolId]/page.tsx`: dynamic tool page.
 
 ---
 
-### Task 1: Project Scaffold
+### Task 1: Python Backend Scaffold and Tool Registry
 
 **Files:**
-- Create: `package.json`
-- Create: `tsconfig.json`
-- Create: `next.config.ts`
-- Create: `postcss.config.mjs`
-- Create: `eslint.config.mjs`
-- Create: `vitest.config.ts`
-- Create: `.gitignore`
-- Create: `.env.example`
-- Create: `src/app/layout.tsx`
-- Create: `src/app/globals.css`
+- Create: `backend/requirements.txt`
+- Create: `backend/.env.example`
+- Create: `backend/pytest.ini`
+- Create: `backend/app/__init__.py`
+- Create: `backend/app/tools.py`
+- Create: `backend/tests/test_tools.py`
 
-- [ ] **Step 1: Create the package manifest**
+- [ ] **Step 1: Create backend dependency and test config files**
 
-Write `package.json`:
+Write `backend/requirements.txt`:
+
+```txt
+fastapi
+uvicorn[standard]
+openai
+python-dotenv
+python-multipart
+pytest
+httpx
+```
+
+Write `backend/.env.example`:
+
+```bash
+OPENAI_API_KEY=
+OPENAI_IMAGE_MODEL=gpt-image-2
+FRONTEND_ORIGIN=http://localhost:3000
+```
+
+Write `backend/pytest.ini`:
+
+```ini
+[pytest]
+pythonpath = .
+testpaths = tests
+```
+
+Write `backend/app/__init__.py`:
+
+```python
+"""Image toolbox FastAPI backend."""
+```
+
+- [ ] **Step 2: Install backend dependencies**
+
+Run:
+
+```bash
+rtk python -m venv backend/.venv
+rtk backend/.venv/Scripts/python -m pip install -r backend/requirements.txt
+```
+
+Expected: dependencies install successfully and `backend/.venv/` remains ignored by Git.
+
+- [ ] **Step 3: Write failing tool registry tests**
+
+Write `backend/tests/test_tools.py`:
+
+```python
+from app.tools import get_tool_by_id, image_sizes, image_tools, is_image_size
+
+
+def test_defines_four_launch_tools_in_display_order():
+    assert [tool.id for tool in image_tools] == [
+        "creator",
+        "restore",
+        "avatar",
+        "product",
+    ]
+
+
+def test_marks_creator_as_generation_and_others_as_edit_capable():
+    assert get_tool_by_id("creator").mode == "generate"
+    assert get_tool_by_id("restore").mode == "edit"
+    assert get_tool_by_id("avatar").mode == "edit"
+    assert get_tool_by_id("product").mode == "edit"
+
+
+def test_requires_uploads_only_for_restore_and_product():
+    assert get_tool_by_id("creator").image_required is False
+    assert get_tool_by_id("restore").image_required is True
+    assert get_tool_by_id("avatar").image_required is False
+    assert get_tool_by_id("product").image_required is True
+
+
+def test_finds_known_tools_and_rejects_unknown_ids():
+    assert get_tool_by_id("avatar").title == "头像/写真生成"
+    assert get_tool_by_id("missing") is None
+
+
+def test_accepts_only_configured_image_sizes():
+    assert image_sizes == ("1024x1024", "1536x1024", "1024x1536")
+    assert is_image_size("1536x1024") is True
+    assert is_image_size("800x800") is False
+```
+
+- [ ] **Step 4: Run tests to verify failure**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_tools.py -q
+```
+
+Expected: FAIL because `backend/app/tools.py` does not exist.
+
+- [ ] **Step 5: Implement backend tool registry**
+
+Write `backend/app/tools.py`:
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+ImageSize = Literal["1024x1024", "1536x1024", "1024x1536"]
+ToolMode = Literal["generate", "edit"]
+ToolId = Literal["creator", "restore", "avatar", "product"]
+
+image_sizes: tuple[ImageSize, ...] = ("1024x1024", "1536x1024", "1024x1536")
+
+
+@dataclass(frozen=True)
+class ImageTool:
+    id: ToolId
+    title: str
+    mode: ToolMode
+    prompt_label: str
+    prompt_required: bool
+    image_required: bool
+    image_label: str
+    default_size: ImageSize
+    size_options: tuple[ImageSize, ...]
+    base_prompt: str
+
+
+image_tools: tuple[ImageTool, ...] = (
+    ImageTool(
+        id="creator",
+        title="AI 图片创作",
+        mode="generate",
+        prompt_label="画面描述",
+        prompt_required=True,
+        image_required=False,
+        image_label="参考图",
+        default_size="1024x1024",
+        size_options=image_sizes,
+        base_prompt=(
+            "Create a polished, original image that follows the user's visual "
+            "description. Prioritize clear composition, coherent lighting, and "
+            "a finished professional look."
+        ),
+    ),
+    ImageTool(
+        id="restore",
+        title="老照片修复",
+        mode="edit",
+        prompt_label="修复要求",
+        prompt_required=False,
+        image_required=True,
+        image_label="上传旧照片",
+        default_size="1024x1024",
+        size_options=image_sizes,
+        base_prompt=(
+            "Restore the uploaded old photo. Preserve the original identity, "
+            "pose, clothing, and historical character. Repair scratches, fading, "
+            "stains, and blur while keeping the result natural."
+        ),
+    ),
+    ImageTool(
+        id="avatar",
+        title="头像/写真生成",
+        mode="edit",
+        prompt_label="头像风格",
+        prompt_required=True,
+        image_required=False,
+        image_label="上传参考图",
+        default_size="1024x1024",
+        size_options=("1024x1024", "1024x1536"),
+        base_prompt=(
+            "Create a refined portrait or avatar. If a reference image is "
+            "provided, preserve the person's core facial identity while applying "
+            "the requested style."
+        ),
+    ),
+    ImageTool(
+        id="product",
+        title="商品图生成",
+        mode="edit",
+        prompt_label="商品场景",
+        prompt_required=False,
+        image_required=True,
+        image_label="上传商品图",
+        default_size="1536x1024",
+        size_options=image_sizes,
+        base_prompt=(
+            "Generate a clean ecommerce product visual from the uploaded product "
+            "image. Preserve the product shape, color, logo, and important "
+            "details while changing the scene as requested."
+        ),
+    ),
+)
+
+
+def get_tool_by_id(tool_id: str) -> ImageTool | None:
+    return next((tool for tool in image_tools if tool.id == tool_id), None)
+
+
+def is_image_size(value: str) -> bool:
+    return value in image_sizes
+```
+
+- [ ] **Step 6: Run registry tests**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_tools.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit backend scaffold and registry**
+
+Run:
+
+```bash
+rtk git add backend/requirements.txt backend/.env.example backend/pytest.ini backend/app/__init__.py backend/app/tools.py backend/tests/test_tools.py
+rtk git commit -m "feat: scaffold fastapi backend registry"
+```
+
+Expected: commit succeeds.
+
+---
+
+### Task 2: Backend Request Validation
+
+**Files:**
+- Create: `backend/app/image_request.py`
+- Create: `backend/tests/test_image_request.py`
+
+- [ ] **Step 1: Write failing validation tests**
+
+Write `backend/tests/test_image_request.py`:
+
+```python
+import asyncio
+from io import BytesIO
+
+from fastapi import UploadFile
+from starlette.datastructures import Headers
+
+from app.image_request import (
+    MAX_IMAGE_BYTES,
+    SUPPORTED_IMAGE_TYPES,
+    ImageRequestError,
+    compose_tool_prompt,
+    validate_image_form,
+)
+from app.tools import get_tool_by_id
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def upload_file(content_type="image/png", data=b"image-bytes", filename="input.png"):
+    return UploadFile(
+        filename=filename,
+        file=BytesIO(data),
+        headers=Headers({"content-type": content_type}),
+    )
+
+
+def test_requires_server_api_key():
+    try:
+        run(validate_image_form("creator", "a quiet studio", "1024x1024", None, None))
+    except ImageRequestError as error:
+        assert error.status_code == 500
+        assert error.message == "服务器未配置 OPENAI_API_KEY。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_unknown_tool_id():
+    try:
+        run(validate_image_form("missing", "a quiet studio", "1024x1024", None, "key"))
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请选择有效的图片工具。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_empty_required_prompt():
+    try:
+        run(validate_image_form("creator", "   ", "1024x1024", None, "key"))
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请输入画面描述。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_requires_upload_for_old_photo_restoration():
+    try:
+        run(validate_image_form("restore", "修复划痕", "1024x1024", None, "key"))
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请上传旧照片。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_unsupported_file_types():
+    try:
+        run(
+            validate_image_form(
+                "restore",
+                "修复划痕",
+                "1024x1024",
+                upload_file(content_type="image/gif"),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "图片格式仅支持 PNG、JPG 或 WebP。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_oversized_uploads():
+    try:
+        run(
+            validate_image_form(
+                "restore",
+                "修复划痕",
+                "1024x1024",
+                upload_file(data=b"x" * (MAX_IMAGE_BYTES + 1)),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "图片不能超过 10MB。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_returns_normalized_valid_request():
+    result = run(
+        validate_image_form(
+            "restore",
+            " 修复划痕 ",
+            "1536x1024",
+            upload_file(content_type="image/jpeg", filename="photo.jpg"),
+            "key",
+        )
+    )
+
+    assert result.tool.id == "restore"
+    assert result.prompt == "修复划痕"
+    assert result.size == "1536x1024"
+    assert result.image_bytes == b"image-bytes"
+    assert result.image_name == "photo.jpg"
+    assert result.image_type == "image/jpeg"
+
+
+def test_falls_back_to_default_size_for_invalid_size_input():
+    result = run(validate_image_form("creator", "a quiet studio", "800x800", None, "key"))
+
+    assert result.size == "1024x1024"
+
+
+def test_compose_tool_prompt_combines_base_prompt_with_user_instructions():
+    tool = get_tool_by_id("product")
+    prompt = compose_tool_prompt(tool, "放在现代厨房里")
+
+    assert tool.base_prompt in prompt
+    assert "User request:" in prompt
+    assert "放在现代厨房里" in prompt
+
+
+def test_compose_tool_prompt_uses_base_prompt_when_optional_prompt_empty():
+    tool = get_tool_by_id("restore")
+
+    assert compose_tool_prompt(tool, "   ") == tool.base_prompt
+
+
+def test_documents_supported_upload_types():
+    assert SUPPORTED_IMAGE_TYPES == ("image/png", "image/jpeg", "image/webp")
+```
+
+- [ ] **Step 2: Run tests to verify failure**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_image_request.py -q
+```
+
+Expected: FAIL because `backend/app/image_request.py` does not exist.
+
+- [ ] **Step 3: Implement validation and prompt composition**
+
+Write `backend/app/image_request.py`:
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from fastapi import UploadFile
+
+from app.tools import ImageSize, ImageTool, get_tool_by_id
+
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+SUPPORTED_IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp")
+
+
+class ImageRequestError(Exception):
+    def __init__(self, status_code: int, message: str) -> None:
+        self.status_code = status_code
+        self.message = message
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ValidImageRequest:
+    tool: ImageTool
+    prompt: str
+    size: ImageSize
+    image_bytes: bytes | None = None
+    image_name: str | None = None
+    image_type: str | None = None
+
+
+async def validate_image_form(
+    tool_id: str | None,
+    prompt: str | None,
+    size: str | None,
+    image: UploadFile | None,
+    api_key: str | None,
+) -> ValidImageRequest:
+    if not api_key:
+        raise ImageRequestError(500, "服务器未配置 OPENAI_API_KEY。")
+
+    tool = get_tool_by_id((tool_id or "").strip())
+    if tool is None:
+        raise ImageRequestError(400, "请选择有效的图片工具。")
+
+    normalized_prompt = (prompt or "").strip()
+    if tool.prompt_required and not normalized_prompt:
+        raise ImageRequestError(400, f"请输入{tool.prompt_label}。")
+
+    image_bytes: bytes | None = None
+    image_name: str | None = None
+    image_type: str | None = None
+
+    if image is not None and image.filename:
+        image_bytes = await image.read()
+
+        if image_bytes:
+            image_type = image.content_type or ""
+            image_name = image.filename
+
+            if image_type not in SUPPORTED_IMAGE_TYPES:
+                raise ImageRequestError(400, "图片格式仅支持 PNG、JPG 或 WebP。")
+
+            if len(image_bytes) > MAX_IMAGE_BYTES:
+                raise ImageRequestError(400, "图片不能超过 10MB。")
+        else:
+            image_bytes = None
+
+    if tool.image_required and image_bytes is None:
+        raise ImageRequestError(400, f"请{tool.image_label}。")
+
+    requested_size = (size or "").strip()
+    normalized_size = (
+        requested_size if requested_size in tool.size_options else tool.default_size
+    )
+
+    return ValidImageRequest(
+        tool=tool,
+        prompt=normalized_prompt,
+        size=normalized_size,
+        image_bytes=image_bytes,
+        image_name=image_name,
+        image_type=image_type,
+    )
+
+
+def compose_tool_prompt(tool: ImageTool, user_prompt: str) -> str:
+    normalized_prompt = user_prompt.strip()
+
+    if not normalized_prompt:
+        return tool.base_prompt
+
+    return f"{tool.base_prompt}\n\nUser request:\n{normalized_prompt}"
+```
+
+- [ ] **Step 4: Run validation tests**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_image_request.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit validation**
+
+Run:
+
+```bash
+rtk git add backend/app/image_request.py backend/tests/test_image_request.py
+rtk git commit -m "feat: validate backend image requests"
+```
+
+Expected: commit succeeds.
+
+---
+
+### Task 3: OpenAI Wrapper and FastAPI Route
+
+**Files:**
+- Create: `backend/app/openai_images.py`
+- Create: `backend/app/main.py`
+- Create: `backend/tests/test_openai_images.py`
+- Create: `backend/tests/test_main.py`
+
+- [ ] **Step 1: Write failing OpenAI wrapper tests**
+
+Write `backend/tests/test_openai_images.py`:
+
+```python
+from types import SimpleNamespace
+
+import pytest
+
+from app.image_request import ValidImageRequest
+from app.openai_images import normalize_openai_image_response, request_image_from_openai
+from app.tools import get_tool_by_id
+
+
+def test_normalizes_base64_image_data():
+    result = normalize_openai_image_response(
+        {"data": [{"b64_json": "abc123", "revised_prompt": "a refined prompt"}]}
+    )
+
+    assert result.src == "data:image/png;base64,abc123"
+    assert result.mime_type == "image/png"
+    assert result.revised_prompt == "a refined prompt"
+
+
+def test_normalizes_hosted_image_url():
+    result = normalize_openai_image_response(
+        SimpleNamespace(data=[SimpleNamespace(url="https://example.test/image.png")])
+    )
+
+    assert result.src == "https://example.test/image.png"
+    assert result.mime_type == "image/png"
+    assert result.revised_prompt is None
+
+
+def test_raises_stable_error_when_no_image_is_returned():
+    with pytest.raises(RuntimeError, match="OpenAI 没有返回图片结果。"):
+        normalize_openai_image_response({"data": []})
+
+
+def test_requests_text_generation_without_uploaded_image():
+    class FakeImages:
+        def __init__(self):
+            self.generate_kwargs = None
+            self.edit_kwargs = None
+
+        def generate(self, **kwargs):
+            self.generate_kwargs = kwargs
+            return {"data": [{"b64_json": "abc123"}]}
+
+        def edit(self, **kwargs):
+            self.edit_kwargs = kwargs
+            return {"data": [{"b64_json": "should-not-happen"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+
+    result = request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("creator"),
+            prompt="a quiet studio",
+            size="1024x1024",
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
+
+    assert result.src == "data:image/png;base64,abc123"
+    assert fake_client.images.generate_kwargs["model"] == "gpt-image-2"
+    assert "a quiet studio" in fake_client.images.generate_kwargs["prompt"]
+    assert fake_client.images.generate_kwargs["size"] == "1024x1024"
+    assert fake_client.images.edit_kwargs is None
+
+
+def test_requests_image_edit_when_uploaded_image_is_present():
+    class FakeImages:
+        def __init__(self):
+            self.edit_kwargs = None
+
+        def edit(self, **kwargs):
+            self.edit_kwargs = kwargs
+            return {"data": [{"b64_json": "edited"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+
+    result = request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("restore"),
+            prompt="修复划痕",
+            size="1024x1024",
+            image_bytes=b"image-bytes",
+            image_name="photo.png",
+            image_type="image/png",
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
+
+    assert result.src == "data:image/png;base64,edited"
+    assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
+    assert fake_client.images.edit_kwargs["image"].name == "photo.png"
+    assert "修复划痕" in fake_client.images.edit_kwargs["prompt"]
+```
+
+- [ ] **Step 2: Run wrapper tests to verify failure**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_openai_images.py -q
+```
+
+Expected: FAIL because `backend/app/openai_images.py` does not exist.
+
+- [ ] **Step 3: Implement the OpenAI wrapper**
+
+Write `backend/app/openai_images.py`:
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from io import BytesIO
+from typing import Any, Callable
+
+from openai import OpenAI
+
+from app.image_request import ValidImageRequest, compose_tool_prompt
+
+
+@dataclass(frozen=True)
+class GeneratedImageResult:
+    src: str
+    mime_type: str = "image/png"
+    revised_prompt: str | None = None
+
+
+def request_image_from_openai(
+    request: ValidImageRequest,
+    api_key: str,
+    model: str,
+    client_factory: Callable[..., Any] = OpenAI,
+) -> GeneratedImageResult:
+    client = client_factory(api_key=api_key)
+    prompt = compose_tool_prompt(request.tool, request.prompt)
+
+    if request.image_bytes:
+        image_file = BytesIO(request.image_bytes)
+        image_file.name = request.image_name or "input.png"
+        response = client.images.edit(
+            model=model,
+            image=image_file,
+            prompt=prompt,
+            size=request.size,
+            quality="auto",
+        )
+        return normalize_openai_image_response(response)
+
+    response = client.images.generate(
+        model=model,
+        prompt=prompt,
+        size=request.size,
+        quality="auto",
+    )
+    return normalize_openai_image_response(response)
+
+
+def normalize_openai_image_response(response: Any) -> GeneratedImageResult:
+    data = _read(response, "data") or []
+    image = data[0] if data else None
+
+    if image is None:
+        raise RuntimeError("OpenAI 没有返回图片结果。")
+
+    b64_json = _read(image, "b64_json")
+    revised_prompt = _read(image, "revised_prompt")
+
+    if b64_json:
+        return GeneratedImageResult(
+            src=f"data:image/png;base64,{b64_json}",
+            revised_prompt=revised_prompt,
+        )
+
+    url = _read(image, "url")
+    if url:
+        return GeneratedImageResult(src=url, revised_prompt=revised_prompt)
+
+    raise RuntimeError("OpenAI 没有返回图片结果。")
+
+
+def _read(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+```
+
+- [ ] **Step 4: Run wrapper tests**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_openai_images.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Write failing FastAPI route tests**
+
+Write `backend/tests/test_main.py`:
+
+```python
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.openai_images import GeneratedImageResult
+
+
+client = TestClient(app)
+
+
+def test_health_route_returns_ok():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_image_route_returns_missing_key_error(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "服务器未配置 OPENAI_API_KEY。"}
+
+
+def test_image_route_returns_validation_error(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "creator", "prompt": "   ", "size": "1024x1024"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "请输入画面描述。"}
+
+
+def test_image_route_returns_generated_image(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.setenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+
+    def fake_request_image_from_openai(valid_request, api_key, model):
+        assert valid_request.tool.id == "creator"
+        assert valid_request.prompt == "a quiet studio"
+        assert api_key == "key"
+        assert model == "gpt-image-2"
+        return GeneratedImageResult(src="data:image/png;base64,abc123")
+
+    monkeypatch.setattr(
+        "app.main.request_image_from_openai",
+        fake_request_image_from_openai,
+    )
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "image": {
+            "src": "data:image/png;base64,abc123",
+            "mimeType": "image/png",
+            "revisedPrompt": None,
+        }
+    }
+```
+
+- [ ] **Step 6: Run route tests to verify failure**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests/test_main.py -q
+```
+
+Expected: FAIL because `backend/app/main.py` does not exist.
+
+- [ ] **Step 7: Implement FastAPI app and image route**
+
+Write `backend/app/main.py`:
+
+```python
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import asdict
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.image_request import ImageRequestError, validate_image_form
+from app.openai_images import request_image_from_openai
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Image Toolbox API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
+@app.post("/api/images/generate")
+async def generate_image(
+    toolId: str = Form(...),
+    prompt: str = Form(""),
+    size: str = Form(""),
+    image: UploadFile | None = File(None),
+):
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        valid_request = await validate_image_form(toolId, prompt, size, image, api_key)
+        generated = request_image_from_openai(
+            valid_request,
+            api_key=api_key or "",
+            model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2"),
+        )
+        payload = asdict(generated)
+        return {
+            "image": {
+                "src": payload["src"],
+                "mimeType": payload["mime_type"],
+                "revisedPrompt": payload["revised_prompt"],
+            }
+        }
+    except ImageRequestError as error:
+        return JSONResponse({"error": error.message}, status_code=error.status_code)
+    except Exception as error:
+        logger.exception("Image generation failed")
+        return JSONResponse(
+            {"error": public_error_message(error)},
+            status_code=502,
+        )
+
+
+def public_error_message(error: Exception) -> str:
+    message = str(error)
+
+    if "content policy" in message.lower() or "safety" in message.lower():
+        return "请求未通过图片安全审核，请调整描述后重试。"
+
+    if message == "OpenAI 没有返回图片结果。":
+        return message
+
+    return "图片生成失败，请稍后重试。"
+```
+
+- [ ] **Step 8: Run backend tests**
+
+Run:
+
+```bash
+rtk backend/.venv/Scripts/python -m pytest backend/tests -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Commit FastAPI integration**
+
+Run:
+
+```bash
+rtk git add backend/app/openai_images.py backend/app/main.py backend/tests/test_openai_images.py backend/tests/test_main.py
+rtk git commit -m "feat: add fastapi image generation route"
+```
+
+Expected: commit succeeds.
+
+---
+
+### Task 4: Frontend Scaffold
+
+**Files:**
+- Create: `frontend/package.json`
+- Create: `frontend/tsconfig.json`
+- Create: `frontend/next.config.ts`
+- Create: `frontend/postcss.config.mjs`
+- Create: `frontend/eslint.config.mjs`
+- Create: `frontend/.env.example`
+- Create: `frontend/src/app/layout.tsx`
+- Create: `frontend/src/app/globals.css`
+
+- [ ] **Step 1: Create frontend package manifest**
+
+Write `frontend/package.json`:
 
 ```json
 {
-  "name": "image-toolbox",
+  "name": "image-toolbox-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "lint": "eslint ."
   },
   "dependencies": {
     "lucide-react": "latest",
     "next": "latest",
-    "openai": "latest",
     "react": "latest",
     "react-dom": "latest"
   },
@@ -82,25 +1025,24 @@ Write `package.json`:
     "eslint": "latest",
     "eslint-config-next": "latest",
     "tailwindcss": "latest",
-    "typescript": "latest",
-    "vitest": "latest"
+    "typescript": "latest"
   }
 }
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [ ] **Step 2: Install frontend dependencies**
 
 Run:
 
 ```bash
-rtk npm install
+rtk npm install --prefix frontend
 ```
 
-Expected: `package-lock.json` is created and npm exits with code 0.
+Expected: `frontend/package-lock.json` is created and npm exits with code 0.
 
-- [ ] **Step 3: Create TypeScript and framework config**
+- [ ] **Step 3: Create frontend configuration**
 
-Write `tsconfig.json`:
+Write `frontend/tsconfig.json`:
 
 ```json
 {
@@ -118,6 +1060,7 @@ Write `tsconfig.json`:
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
+    "baseUrl": ".",
     "plugins": [
       {
         "name": "next"
@@ -132,7 +1075,7 @@ Write `tsconfig.json`:
 }
 ```
 
-Write `next.config.ts`:
+Write `frontend/next.config.ts`:
 
 ```ts
 import type { NextConfig } from "next";
@@ -142,7 +1085,7 @@ const nextConfig: NextConfig = {};
 export default nextConfig;
 ```
 
-Write `postcss.config.mjs`:
+Write `frontend/postcss.config.mjs`:
 
 ```js
 const config = {
@@ -154,7 +1097,7 @@ const config = {
 export default config;
 ```
 
-Write `eslint.config.mjs`:
+Write `frontend/eslint.config.mjs`:
 
 ```js
 import { dirname } from "node:path";
@@ -175,62 +1118,31 @@ const eslintConfig = [
 export default eslintConfig;
 ```
 
-Write `vitest.config.ts`:
-
-```ts
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    environment: "node",
-    globals: true,
-    include: ["src/**/*.test.ts"],
-  },
-});
-```
-
-- [ ] **Step 4: Create environment and ignore files**
-
-Write `.gitignore`:
-
-```gitignore
-node_modules
-.next
-out
-coverage
-.env
-.env.local
-.env.*.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-```
-
-Write `.env.example`:
+Write `frontend/.env.example`:
 
 ```bash
-OPENAI_API_KEY=
-OPENAI_IMAGE_MODEL=gpt-image-2
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
-- [ ] **Step 5: Create the root app shell**
+- [ ] **Step 4: Create the root frontend app shell**
 
-Write `src/app/layout.tsx`:
+Write `frontend/src/app/layout.tsx`:
 
 ```tsx
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Image Toolbox",
-  description: "AI image creation, photo restoration, portraits, and product visuals powered by OpenAI image models.",
+  description:
+    "AI image creation, photo restoration, portraits, and product visuals powered by OpenAI image models.",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: ReactNode;
 }>) {
   return (
     <html lang="zh-CN">
@@ -240,7 +1152,7 @@ export default function RootLayout({
 }
 ```
 
-Write `src/app/globals.css`:
+Write `frontend/src/app/globals.css`:
 
 ```css
 @import "tailwindcss";
@@ -294,93 +1206,41 @@ button {
 }
 ```
 
-- [ ] **Step 6: Verify scaffold compiles far enough**
+- [ ] **Step 5: Verify scaffold build reaches missing page error**
 
 Run:
 
 ```bash
-rtk npm run test
+rtk npm run lint --prefix frontend
 ```
 
-Expected: Vitest reports no test files or exits cleanly after configuration loads. If Vitest exits because no tests exist, continue to Task 2 where the first tests are added.
+Expected: PASS or only reports that no page exists yet. If lint fails for a concrete syntax or config error, fix it before continuing.
 
-- [ ] **Step 7: Commit the scaffold**
+- [ ] **Step 6: Commit frontend scaffold**
 
 Run:
 
 ```bash
-rtk git add package.json package-lock.json tsconfig.json next.config.ts postcss.config.mjs eslint.config.mjs vitest.config.ts .gitignore .env.example src/app/layout.tsx src/app/globals.css
-rtk git commit -m "chore: scaffold next image toolbox"
+rtk git add frontend/package.json frontend/package-lock.json frontend/tsconfig.json frontend/next.config.ts frontend/postcss.config.mjs frontend/eslint.config.mjs frontend/.env.example frontend/src/app/layout.tsx frontend/src/app/globals.css
+rtk git commit -m "chore: scaffold next frontend"
 ```
 
 Expected: commit succeeds.
 
 ---
 
-### Task 2: Tool Registry
+### Task 5: Toolbox Frontend Pages and Forms
 
 **Files:**
-- Create: `src/lib/tools.ts`
-- Create: `src/lib/tools.test.ts`
+- Create: `frontend/src/lib/tools.ts`
+- Create: `frontend/src/components/tool-card.tsx`
+- Create: `frontend/src/components/tool-form.tsx`
+- Create: `frontend/src/app/page.tsx`
+- Create: `frontend/src/app/tools/[toolId]/page.tsx`
 
-- [ ] **Step 1: Write failing registry tests**
+- [ ] **Step 1: Create frontend tool registry**
 
-Write `src/lib/tools.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { getToolById, imageTools, imageSizes, isImageSize } from "./tools";
-
-describe("image tool registry", () => {
-  it("defines the four launch tools in display order", () => {
-    expect(imageTools.map((tool) => tool.id)).toEqual([
-      "creator",
-      "restore",
-      "avatar",
-      "product",
-    ]);
-  });
-
-  it("marks text creation as generation and the other tools as edits", () => {
-    expect(getToolById("creator")?.mode).toBe("generate");
-    expect(getToolById("restore")?.mode).toBe("edit");
-    expect(getToolById("avatar")?.mode).toBe("edit");
-    expect(getToolById("product")?.mode).toBe("edit");
-  });
-
-  it("requires uploads only for restoration and product workflows", () => {
-    expect(getToolById("creator")?.imageRequired).toBe(false);
-    expect(getToolById("restore")?.imageRequired).toBe(true);
-    expect(getToolById("avatar")?.imageRequired).toBe(false);
-    expect(getToolById("product")?.imageRequired).toBe(true);
-  });
-
-  it("finds known tools and rejects unknown ids", () => {
-    expect(getToolById("avatar")?.title).toBe("头像/写真生成");
-    expect(getToolById("missing")).toBeUndefined();
-  });
-
-  it("accepts only configured image sizes", () => {
-    expect(imageSizes).toEqual(["1024x1024", "1536x1024", "1024x1536"]);
-    expect(isImageSize("1536x1024")).toBe(true);
-    expect(isImageSize("800x800")).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify failure**
-
-Run:
-
-```bash
-rtk npm run test -- src/lib/tools.test.ts
-```
-
-Expected: FAIL because `src/lib/tools.ts` does not exist.
-
-- [ ] **Step 3: Implement the tool registry**
-
-Write `src/lib/tools.ts`:
+Write `frontend/src/lib/tools.ts`:
 
 ```ts
 export const imageSizes = ["1024x1024", "1536x1024", "1024x1536"] as const;
@@ -400,12 +1260,10 @@ export type ImageTool = {
   accent: "teal" | "red" | "blue" | "gold";
   promptLabel: string;
   promptPlaceholder: string;
-  promptRequired: boolean;
   imageRequired: boolean;
   imageLabel: string;
   defaultSize: ImageSize;
   sizeOptions: ImageSize[];
-  basePrompt: string;
   examples: string[];
 };
 
@@ -419,14 +1277,12 @@ export const imageTools: ImageTool[] = [
     icon: "sparkles",
     accent: "teal",
     promptLabel: "画面描述",
-    promptPlaceholder: "例如：一间清晨阳光里的木质咖啡馆，窗边有绿植，写实摄影风格",
-    promptRequired: true,
+    promptPlaceholder:
+      "例如：一间清晨阳光里的木质咖啡馆，窗边有绿植，写实摄影风格",
     imageRequired: false,
     imageLabel: "参考图",
     defaultSize: "1024x1024",
     sizeOptions: [...imageSizes],
-    basePrompt:
-      "Create a polished, original image that follows the user's visual description. Prioritize clear composition, coherent lighting, and a finished professional look.",
     examples: ["写实摄影", "儿童绘本", "电影海报", "水彩插画"],
   },
   {
@@ -438,14 +1294,12 @@ export const imageTools: ImageTool[] = [
     icon: "wand",
     accent: "red",
     promptLabel: "修复要求",
-    promptPlaceholder: "例如：保留人物五官和年代感，修复划痕，提升清晰度，恢复自然色彩",
-    promptRequired: false,
+    promptPlaceholder:
+      "例如：保留人物五官和年代感，修复划痕，提升清晰度，恢复自然色彩",
     imageRequired: true,
     imageLabel: "上传旧照片",
     defaultSize: "1024x1024",
     sizeOptions: [...imageSizes],
-    basePrompt:
-      "Restore the uploaded old photo. Preserve the original identity, pose, clothing, and historical character. Repair scratches, fading, stains, and blur while keeping the result natural.",
     examples: ["黑白上色", "划痕修复", "清晰增强", "褪色恢复"],
   },
   {
@@ -457,14 +1311,12 @@ export const imageTools: ImageTool[] = [
     icon: "user",
     accent: "blue",
     promptLabel: "头像风格",
-    promptPlaceholder: "例如：商务头像，深色西装，自然微笑，干净灰色背景，柔和棚拍光",
-    promptRequired: true,
+    promptPlaceholder:
+      "例如：商务头像，深色西装，自然微笑，干净灰色背景，柔和棚拍光",
     imageRequired: false,
     imageLabel: "上传参考图",
     defaultSize: "1024x1024",
     sizeOptions: ["1024x1024", "1024x1536"],
-    basePrompt:
-      "Create a refined portrait or avatar. If a reference image is provided, preserve the person's core facial identity while applying the requested style.",
     examples: ["商务头像", "证件照风格", "社媒头像", "电影感写真"],
   },
   {
@@ -476,14 +1328,12 @@ export const imageTools: ImageTool[] = [
     icon: "package",
     accent: "gold",
     promptLabel: "商品场景",
-    promptPlaceholder: "例如：保留商品外观，放在浅色石材台面上，背景是现代厨房，自然日光",
-    promptRequired: false,
+    promptPlaceholder:
+      "例如：保留商品外观，放在浅色石材台面上，背景是现代厨房，自然日光",
     imageRequired: true,
     imageLabel: "上传商品图",
     defaultSize: "1536x1024",
     sizeOptions: [...imageSizes],
-    basePrompt:
-      "Generate a clean ecommerce product visual from the uploaded product image. Preserve the product shape, color, logo, and important details while changing the scene as requested.",
     examples: ["白底图", "生活方式场景", "节日背景", "电商主图"],
   },
 ];
@@ -491,633 +1341,11 @@ export const imageTools: ImageTool[] = [
 export function getToolById(id: string): ImageTool | undefined {
   return imageTools.find((tool) => tool.id === id);
 }
-
-export function isImageSize(value: string): value is ImageSize {
-  return imageSizes.includes(value as ImageSize);
-}
 ```
 
-- [ ] **Step 4: Run registry tests**
+- [ ] **Step 2: Create reusable tool card component**
 
-Run:
-
-```bash
-rtk npm run test -- src/lib/tools.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit the registry**
-
-Run:
-
-```bash
-rtk git add src/lib/tools.ts src/lib/tools.test.ts
-rtk git commit -m "feat: add image tool registry"
-```
-
-Expected: commit succeeds.
-
----
-
-### Task 3: Request Validation
-
-**Files:**
-- Create: `src/lib/image-request.ts`
-- Create: `src/lib/image-request.test.ts`
-
-- [ ] **Step 1: Write failing validation tests**
-
-Write `src/lib/image-request.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import {
-  composeToolPrompt,
-  MAX_IMAGE_BYTES,
-  SUPPORTED_IMAGE_TYPES,
-  validateImageFormData,
-} from "./image-request";
-import { getToolById } from "./tools";
-
-function form(entries: Record<string, string | File | undefined>) {
-  const data = new FormData();
-  for (const [key, value] of Object.entries(entries)) {
-    if (value !== undefined) {
-      data.append(key, value);
-    }
-  }
-  return data;
-}
-
-function imageFile(type = "image/png", size = 16) {
-  return new File([new Uint8Array(size)], "input.png", { type });
-}
-
-describe("validateImageFormData", () => {
-  it("requires the server API key", () => {
-    const result = validateImageFormData(
-      form({ toolId: "creator", prompt: "a quiet studio" }),
-      {},
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 500,
-      error: "服务器未配置 OPENAI_API_KEY。",
-    });
-  });
-
-  it("rejects an unknown tool id", () => {
-    const result = validateImageFormData(
-      form({ toolId: "missing", prompt: "a quiet studio" }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: "请选择有效的图片工具。",
-    });
-  });
-
-  it("rejects an empty required prompt", () => {
-    const result = validateImageFormData(
-      form({ toolId: "creator", prompt: "   " }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: "请输入画面描述。",
-    });
-  });
-
-  it("requires an upload for old photo restoration", () => {
-    const result = validateImageFormData(
-      form({ toolId: "restore", prompt: "修复划痕" }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: "请上传旧照片。",
-    });
-  });
-
-  it("rejects unsupported file types", () => {
-    const result = validateImageFormData(
-      form({
-        toolId: "restore",
-        prompt: "修复划痕",
-        image: imageFile("image/gif"),
-      }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: "图片格式仅支持 PNG、JPG 或 WebP。",
-    });
-  });
-
-  it("rejects oversized uploads", () => {
-    const result = validateImageFormData(
-      form({
-        toolId: "restore",
-        prompt: "修复划痕",
-        image: imageFile("image/png", MAX_IMAGE_BYTES + 1),
-      }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: "图片不能超过 10MB。",
-    });
-  });
-
-  it("returns a normalized valid request", () => {
-    const result = validateImageFormData(
-      form({
-        toolId: "restore",
-        prompt: "修复划痕",
-        size: "1536x1024",
-        image: imageFile("image/jpeg"),
-      }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.tool.id).toBe("restore");
-      expect(result.value.prompt).toBe("修复划痕");
-      expect(result.value.size).toBe("1536x1024");
-      expect(result.value.image?.type).toBe("image/jpeg");
-    }
-  });
-
-  it("falls back to the tool default size for invalid size input", () => {
-    const result = validateImageFormData(
-      form({ toolId: "creator", prompt: "a quiet studio", size: "800x800" }),
-      { OPENAI_API_KEY: "test-key" },
-    );
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.size).toBe("1024x1024");
-    }
-  });
-});
-
-describe("composeToolPrompt", () => {
-  it("combines the base prompt with user instructions", () => {
-    const tool = getToolById("product");
-    expect(tool).toBeDefined();
-
-    const prompt = composeToolPrompt(tool!, "放在现代厨房里");
-
-    expect(prompt).toContain(tool!.basePrompt);
-    expect(prompt).toContain("User request:");
-    expect(prompt).toContain("放在现代厨房里");
-  });
-
-  it("uses the base prompt when optional user instructions are empty", () => {
-    const tool = getToolById("restore");
-    expect(tool).toBeDefined();
-
-    expect(composeToolPrompt(tool!, "   ")).toBe(tool!.basePrompt);
-  });
-
-  it("documents supported upload types", () => {
-    expect(SUPPORTED_IMAGE_TYPES).toEqual([
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-    ]);
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify failure**
-
-Run:
-
-```bash
-rtk npm run test -- src/lib/image-request.test.ts
-```
-
-Expected: FAIL because `src/lib/image-request.ts` does not exist.
-
-- [ ] **Step 3: Implement validation and prompt composition**
-
-Write `src/lib/image-request.ts`:
-
-```ts
-import { getToolById, isImageSize, type ImageSize, type ImageTool } from "./tools";
-
-export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-export const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
-
-export type SupportedImageType = (typeof SUPPORTED_IMAGE_TYPES)[number];
-
-export type ValidImageRequest = {
-  tool: ImageTool;
-  prompt: string;
-  size: ImageSize;
-  image?: File;
-};
-
-export type ValidationResult =
-  | {
-      ok: true;
-      value: ValidImageRequest;
-    }
-  | {
-      ok: false;
-      status: number;
-      error: string;
-    };
-
-type EnvLike = {
-  OPENAI_API_KEY?: string;
-};
-
-export function validateImageFormData(
-  formData: FormData,
-  env: EnvLike = process.env,
-): ValidationResult {
-  if (!env.OPENAI_API_KEY) {
-    return {
-      ok: false,
-      status: 500,
-      error: "服务器未配置 OPENAI_API_KEY。",
-    };
-  }
-
-  const toolId = readString(formData, "toolId");
-  const tool = toolId ? getToolById(toolId) : undefined;
-
-  if (!tool) {
-    return {
-      ok: false,
-      status: 400,
-      error: "请选择有效的图片工具。",
-    };
-  }
-
-  const prompt = readString(formData, "prompt").trim();
-
-  if (tool.promptRequired && !prompt) {
-    return {
-      ok: false,
-      status: 400,
-      error: `请输入${tool.promptLabel}。`,
-    };
-  }
-
-  const upload = readFile(formData, "image");
-
-  if (tool.imageRequired && !upload) {
-    return {
-      ok: false,
-      status: 400,
-      error: `请${tool.imageLabel}。`,
-    };
-  }
-
-  if (upload && !isSupportedImageType(upload.type)) {
-    return {
-      ok: false,
-      status: 400,
-      error: "图片格式仅支持 PNG、JPG 或 WebP。",
-    };
-  }
-
-  if (upload && upload.size > MAX_IMAGE_BYTES) {
-    return {
-      ok: false,
-      status: 400,
-      error: "图片不能超过 10MB。",
-    };
-  }
-
-  const requestedSize = readString(formData, "size");
-  const size = isImageSize(requestedSize) && tool.sizeOptions.includes(requestedSize)
-    ? requestedSize
-    : tool.defaultSize;
-
-  return {
-    ok: true,
-    value: {
-      tool,
-      prompt,
-      size,
-      ...(upload ? { image: upload } : {}),
-    },
-  };
-}
-
-export function composeToolPrompt(tool: ImageTool, userPrompt: string) {
-  const trimmed = userPrompt.trim();
-
-  if (!trimmed) {
-    return tool.basePrompt;
-  }
-
-  return `${tool.basePrompt}\n\nUser request:\n${trimmed}`;
-}
-
-function readString(formData: FormData, key: string) {
-  const value = formData.get(key);
-  return typeof value === "string" ? value : "";
-}
-
-function readFile(formData: FormData, key: string) {
-  const value = formData.get(key);
-
-  if (value instanceof File && value.size > 0) {
-    return value;
-  }
-
-  return undefined;
-}
-
-function isSupportedImageType(type: string): type is SupportedImageType {
-  return SUPPORTED_IMAGE_TYPES.includes(type as SupportedImageType);
-}
-```
-
-- [ ] **Step 4: Run validation tests**
-
-Run:
-
-```bash
-rtk npm run test -- src/lib/image-request.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit validation**
-
-Run:
-
-```bash
-rtk git add src/lib/image-request.ts src/lib/image-request.test.ts
-rtk git commit -m "feat: validate image generation requests"
-```
-
-Expected: commit succeeds.
-
----
-
-### Task 4: OpenAI Images API Wrapper and Route
-
-**Files:**
-- Create: `src/lib/openai-images.ts`
-- Create: `src/lib/openai-images.test.ts`
-- Create: `src/app/api/images/generate/route.ts`
-
-- [ ] **Step 1: Write failing OpenAI wrapper tests**
-
-Write `src/lib/openai-images.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { normalizeOpenAIImageResponse } from "./openai-images";
-
-describe("normalizeOpenAIImageResponse", () => {
-  it("returns a png data URL when the API returns base64 image data", () => {
-    const result = normalizeOpenAIImageResponse({
-      data: [{ b64_json: "abc123", revised_prompt: "a refined prompt" }],
-    });
-
-    expect(result).toEqual({
-      src: "data:image/png;base64,abc123",
-      mimeType: "image/png",
-      revisedPrompt: "a refined prompt",
-    });
-  });
-
-  it("returns an API URL when the API returns a hosted URL", () => {
-    const result = normalizeOpenAIImageResponse({
-      data: [{ url: "https://example.test/image.png" }],
-    });
-
-    expect(result).toEqual({
-      src: "https://example.test/image.png",
-      mimeType: "image/png",
-      revisedPrompt: undefined,
-    });
-  });
-
-  it("throws a stable error when no image is returned", () => {
-    expect(() => normalizeOpenAIImageResponse({ data: [] })).toThrow(
-      "OpenAI 没有返回图片结果。",
-    );
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify failure**
-
-Run:
-
-```bash
-rtk npm run test -- src/lib/openai-images.test.ts
-```
-
-Expected: FAIL because `src/lib/openai-images.ts` does not exist.
-
-- [ ] **Step 3: Implement the OpenAI wrapper**
-
-Write `src/lib/openai-images.ts`:
-
-```ts
-import OpenAI, { toFile } from "openai";
-import { composeToolPrompt, type ValidImageRequest } from "./image-request";
-
-export type GeneratedImageResult = {
-  src: string;
-  mimeType: "image/png";
-  revisedPrompt?: string;
-};
-
-type ImageResponseLike = {
-  data?: Array<{
-    b64_json?: string | null;
-    url?: string | null;
-    revised_prompt?: string | null;
-  }>;
-};
-
-export async function requestImageFromOpenAI(
-  request: ValidImageRequest,
-  apiKey: string,
-): Promise<GeneratedImageResult> {
-  const client = new OpenAI({ apiKey });
-  const prompt = composeToolPrompt(request.tool, request.prompt);
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
-
-  if (request.tool.mode === "generate") {
-    const response = await client.images.generate({
-      model,
-      prompt,
-      size: request.size,
-      quality: "auto",
-    });
-
-    return normalizeOpenAIImageResponse(response);
-  }
-
-  if (!request.image) {
-    throw new Error("该工具需要上传图片。");
-  }
-
-  const image = await browserFileToOpenAIFile(request.image);
-  const response = await client.images.edit({
-    model,
-    image,
-    prompt,
-    size: request.size,
-    quality: "auto",
-  });
-
-  return normalizeOpenAIImageResponse(response);
-}
-
-export function normalizeOpenAIImageResponse(
-  response: ImageResponseLike,
-): GeneratedImageResult {
-  const image = response.data?.[0];
-
-  if (image?.b64_json) {
-    return {
-      src: `data:image/png;base64,${image.b64_json}`,
-      mimeType: "image/png",
-      revisedPrompt: image.revised_prompt ?? undefined,
-    };
-  }
-
-  if (image?.url) {
-    return {
-      src: image.url,
-      mimeType: "image/png",
-      revisedPrompt: image.revised_prompt ?? undefined,
-    };
-  }
-
-  throw new Error("OpenAI 没有返回图片结果。");
-}
-
-async function browserFileToOpenAIFile(file: File) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  return toFile(buffer, file.name || "input.png", {
-    type: file.type || "image/png",
-  });
-}
-```
-
-- [ ] **Step 4: Run OpenAI wrapper tests**
-
-Run:
-
-```bash
-rtk npm run test -- src/lib/openai-images.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Create the API route**
-
-Write `src/app/api/images/generate/route.ts`:
-
-```ts
-import { NextResponse } from "next/server";
-import { validateImageFormData } from "@/lib/image-request";
-import { requestImageFromOpenAI } from "@/lib/openai-images";
-
-export const runtime = "nodejs";
-
-export async function POST(request: Request) {
-  try {
-    const formData = await request.formData();
-    const validation = validateImageFormData(formData);
-
-    if (!validation.ok) {
-      return NextResponse.json(
-        { error: validation.error },
-        { status: validation.status },
-      );
-    }
-
-    const image = await requestImageFromOpenAI(
-      validation.value,
-      process.env.OPENAI_API_KEY!,
-    );
-
-    return NextResponse.json({ image });
-  } catch (error) {
-    console.error("Image generation failed", error);
-
-    return NextResponse.json(
-      { error: getPublicErrorMessage(error) },
-      { status: 502 },
-    );
-  }
-}
-
-function getPublicErrorMessage(error: unknown) {
-  if (error instanceof Error && /content policy|safety/i.test(error.message)) {
-    return "请求未通过图片安全审核，请调整描述后重试。";
-  }
-
-  if (error instanceof Error && error.message === "OpenAI 没有返回图片结果。") {
-    return error.message;
-  }
-
-  return "图片生成失败，请稍后重试。";
-}
-```
-
-- [ ] **Step 6: Run all unit tests**
-
-Run:
-
-```bash
-rtk npm run test
-```
-
-Expected: PASS for registry, validation, and OpenAI wrapper tests.
-
-- [ ] **Step 7: Commit server integration**
-
-Run:
-
-```bash
-rtk git add src/lib/openai-images.ts src/lib/openai-images.test.ts src/app/api/images/generate/route.ts
-rtk git commit -m "feat: add openai image generation api"
-```
-
-Expected: commit succeeds.
-
----
-
-### Task 5: Toolbox Frontend
-
-**Files:**
-- Create: `src/components/tool-card.tsx`
-- Create: `src/components/tool-form.tsx`
-- Create: `src/app/page.tsx`
-- Create: `src/app/tools/[toolId]/page.tsx`
-
-- [ ] **Step 1: Create reusable tool cards**
-
-Write `src/components/tool-card.tsx`:
+Write `frontend/src/components/tool-card.tsx`:
 
 ```tsx
 import Link from "next/link";
@@ -1132,10 +1360,10 @@ const iconMap = {
 };
 
 const accentClasses = {
-  teal: "border-teal-700/25 bg-teal-700/8 text-teal-900",
-  red: "border-red-700/25 bg-red-700/8 text-red-900",
-  blue: "border-blue-700/25 bg-blue-700/8 text-blue-900",
-  gold: "border-amber-700/30 bg-amber-700/10 text-amber-950",
+  teal: "border-teal-700/25 bg-teal-50 text-teal-900",
+  red: "border-red-700/25 bg-red-50 text-red-900",
+  blue: "border-blue-700/25 bg-blue-50 text-blue-900",
+  gold: "border-amber-700/30 bg-amber-50 text-amber-950",
 };
 
 export function ToolCard({ tool }: { tool: ImageTool }) {
@@ -1177,30 +1405,34 @@ export function ToolCard({ tool }: { tool: ImageTool }) {
 }
 ```
 
-- [ ] **Step 2: Create the client tool form**
+- [ ] **Step 3: Create client tool form component**
 
-Write `src/components/tool-form.tsx`:
+Write `frontend/src/components/tool-form.tsx`:
 
 ```tsx
 "use client";
 
 import { useMemo, useState } from "react";
 import { AlertCircle, ImageIcon, Loader2, Upload } from "lucide-react";
-import type { ImageTool } from "@/lib/tools";
+import type { ImageSize, ImageTool } from "@/lib/tools";
 
 type GeneratedImage = {
   src: string;
   mimeType: string;
-  revisedPrompt?: string;
+  revisedPrompt?: string | null;
 };
 
 type ToolFormProps = {
   tool: ImageTool;
 };
 
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:8000";
+
 export function ToolForm({ tool }: ToolFormProps) {
   const [prompt, setPrompt] = useState("");
-  const [size, setSize] = useState(tool.defaultSize);
+  const [size, setSize] = useState<ImageSize>(tool.defaultSize);
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<GeneratedImage | null>(null);
   const [error, setError] = useState("");
@@ -1230,7 +1462,7 @@ export function ToolForm({ tool }: ToolFormProps) {
     }
 
     try {
-      const response = await fetch("/api/images/generate", {
+      const response = await fetch(`${apiBaseUrl}/api/images/generate`, {
         method: "POST",
         body: formData,
       });
@@ -1291,7 +1523,7 @@ export function ToolForm({ tool }: ToolFormProps) {
         </label>
         <select
           value={size}
-          onChange={(event) => setSize(event.target.value as typeof size)}
+          onChange={(event) => setSize(event.target.value as ImageSize)}
           className="mt-3 w-full rounded-md border border-stone-300 bg-white px-4 py-3 text-stone-950 outline-none transition focus:border-stone-950"
         >
           {tool.sizeOptions.map((option) => (
@@ -1351,9 +1583,9 @@ export function ToolForm({ tool }: ToolFormProps) {
 }
 ```
 
-- [ ] **Step 3: Create the toolbox homepage**
+- [ ] **Step 4: Create homepage and dynamic tool pages**
 
-Write `src/app/page.tsx`:
+Write `frontend/src/app/page.tsx`:
 
 ```tsx
 import { ToolCard } from "@/components/tool-card";
@@ -1372,7 +1604,7 @@ export default function Home() {
           </h1>
         </div>
         <p className="max-w-xl text-lg leading-8 text-stone-600">
-          选择一个功能，输入描述或上传图片，由服务器安全调用 OpenAI 图片模型生成结果。
+          选择一个功能，输入描述或上传图片，由 Python 后端安全调用 OpenAI 图片模型生成结果。
         </p>
       </header>
 
@@ -1386,9 +1618,7 @@ export default function Home() {
 }
 ```
 
-- [ ] **Step 4: Create dynamic tool pages**
-
-Write `src/app/tools/[toolId]/page.tsx`:
+Write `frontend/src/app/tools/[toolId]/page.tsx`:
 
 ```tsx
 import Link from "next/link";
@@ -1458,22 +1688,23 @@ export default async function ToolPage({ params }: ToolPageProps) {
 }
 ```
 
-- [ ] **Step 5: Run frontend build**
+- [ ] **Step 5: Run frontend lint and build**
 
 Run:
 
 ```bash
-rtk npm run build
+rtk npm run lint --prefix frontend
+rtk npm run build --prefix frontend
 ```
 
-Expected: PASS. The build lists `/`, `/tools/[toolId]`, and `/api/images/generate`.
+Expected: both commands exit with code 0 and the build lists `/` and `/tools/[toolId]`.
 
-- [ ] **Step 6: Commit frontend**
+- [ ] **Step 6: Commit frontend toolbox**
 
 Run:
 
 ```bash
-rtk git add src/components/tool-card.tsx src/components/tool-form.tsx src/app/page.tsx src/app/tools/[toolId]/page.tsx
+rtk git add frontend/src/lib/tools.ts frontend/src/components/tool-card.tsx frontend/src/components/tool-form.tsx frontend/src/app/page.tsx frontend/src/app/tools/[toolId]/page.tsx
 rtk git commit -m "feat: build image toolbox frontend"
 ```
 
@@ -1486,57 +1717,66 @@ Expected: commit succeeds.
 **Files:**
 - Modify only if verification reveals a concrete defect in files from earlier tasks.
 
-- [ ] **Step 1: Run the complete automated check suite**
+- [ ] **Step 1: Run complete automated checks**
 
 Run:
 
 ```bash
-rtk npm run test
-rtk npm run lint
-rtk npm run build
+rtk backend/.venv/Scripts/python -m pytest backend/tests -q
+rtk npm run lint --prefix frontend
+rtk npm run build --prefix frontend
 ```
 
 Expected: all commands exit with code 0.
 
-- [ ] **Step 2: Verify missing API key behavior**
+- [ ] **Step 2: Verify missing API key behavior through FastAPI**
 
-Run:
+Run the backend without `OPENAI_API_KEY`:
 
 ```bash
-rtk npm run dev
+rtk backend/.venv/Scripts/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Open `http://localhost:3000`, choose `AI 图片创作`, submit a prompt without creating `.env.local`.
+In another shell, run:
 
-Expected: the page displays `服务器未配置 OPENAI_API_KEY。`.
+```bash
+rtk powershell -NoProfile -Command "Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/api/images/generate' -Form @{ toolId='creator'; prompt='a quiet studio'; size='1024x1024' }"
+```
 
-- [ ] **Step 3: Verify request validation in the browser**
+Expected: HTTP 500 JSON response with `服务器未配置 OPENAI_API_KEY。`.
 
-With the dev server still running:
+- [ ] **Step 3: Verify frontend can reach backend errors**
 
-- Open `http://localhost:3000/tools/creator`, submit an empty prompt.
-- Open `http://localhost:3000/tools/restore`, submit without an upload.
-- Open `http://localhost:3000/tools/restore`, upload a GIF file.
+Create `frontend/.env.local`:
 
-Expected:
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
 
-- Empty creator prompt displays `请输入画面描述。`.
-- Missing restoration upload displays `请上传旧照片。`.
-- GIF upload displays `图片格式仅支持 PNG、JPG 或 WebP。`.
+Run the frontend:
+
+```bash
+rtk npm run dev --prefix frontend
+```
+
+Open `http://localhost:3000/tools/creator`, submit `a quiet studio` while the backend has no `OPENAI_API_KEY`.
+
+Expected: the form displays `服务器未配置 OPENAI_API_KEY。`.
 
 - [ ] **Step 4: Verify one real OpenAI image request**
 
-Create `.env.local` with:
+Create `backend/.env`:
 
 ```bash
-OPENAI_API_KEY=replace-with-real-key
+OPENAI_API_KEY=<actual OpenAI API key from the deployment environment>
 OPENAI_IMAGE_MODEL=gpt-image-2
+FRONTEND_ORIGIN=http://localhost:3000
 ```
 
-Restart the dev server:
+Restart the backend:
 
 ```bash
-rtk npm run dev
+rtk backend/.venv/Scripts/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 Open `http://localhost:3000/tools/creator`, submit:
@@ -1566,22 +1806,25 @@ Expected: commit succeeds when there are changes. If no files changed, skip the 
 Spec coverage:
 
 - Toolbox homepage with four feature cards: Task 5.
-- Separate configurable tool pages: Tasks 2 and 5.
-- Server-side `OPENAI_API_KEY`: Tasks 1, 3, 4, and 6.
-- OpenAI Images API integration: Task 4.
-- Text generation and image editing flows: Tasks 2, 3, 4, and 5.
-- User-facing validation and errors: Tasks 3, 4, 5, and 6.
-- Build and real API verification: Task 6.
+- Separate configurable tool pages: Task 5.
+- Python backend with FastAPI: Tasks 1, 2, and 3.
+- Server-side `OPENAI_API_KEY`: Tasks 2, 3, and 6.
+- OpenAI Python SDK integration: Task 3.
+- Text generation and image editing flows: Tasks 2 and 3.
+- Stable backend JSON errors and frontend error display: Tasks 2, 3, 5, and 6.
+- Backend tests, frontend lint, frontend build, and real API verification: Task 6.
 
 Placeholder scan:
 
-- The plan contains no unfinished placeholder steps.
-- Every file creation step includes concrete content.
-- Every verification step includes exact commands and expected results.
+- The plan contains no unfinished implementation placeholders.
+- Every created source file has concrete content.
+- Commands and expected results are explicit.
+- The only value the implementer must supply is the real secret in `backend/.env` during manual verification.
 
 Type consistency:
 
-- `ToolId`, `ImageTool`, `ImageSize`, and `ValidImageRequest` are defined before use.
-- `validateImageFormData` returns the value consumed by `requestImageFromOpenAI`.
-- The API route returns the `GeneratedImageResult` shape consumed by `ToolForm`.
+- Backend tool ids match frontend tool ids.
+- `ValidImageRequest` is returned by validation and consumed by `request_image_from_openai`.
+- `GeneratedImageResult` maps to frontend `{ src, mimeType, revisedPrompt }`.
+- Frontend posts `toolId`, `prompt`, `size`, and optional `image`, matching FastAPI route parameters.
 
