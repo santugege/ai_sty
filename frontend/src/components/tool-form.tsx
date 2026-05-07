@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AlertCircle, ImageIcon, Loader2, Upload } from "lucide-react";
 import type { ImageSize, ImageTool } from "@/lib/tools";
 
@@ -15,14 +15,37 @@ type ToolFormProps = {
   tool: ImageTool;
 };
 
+type ImageGenerationPayload = {
+  image?: GeneratedImage;
+  error?: string;
+};
+
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:8000";
+
+const genericErrorMessage = "图片生成失败，请稍后重试。";
 
 function getImageDimensions(size: ImageSize) {
   const [width, height] = size.split("x").map(Number) as [number, number];
 
   return { width, height };
+}
+
+async function readImageGenerationPayload(
+  response: Response,
+): Promise<ImageGenerationPayload> {
+  const contentType = response.headers.get("content-type")?.toLowerCase();
+
+  if (!contentType?.includes("json")) {
+    return {};
+  }
+
+  try {
+    return (await response.json()) as ImageGenerationPayload;
+  } catch {
+    return {};
+  }
 }
 
 export function ToolForm({ tool }: ToolFormProps) {
@@ -33,6 +56,11 @@ export function ToolForm({ tool }: ToolFormProps) {
   const [result, setResult] = useState<GeneratedImage | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
+
+  const promptId = `${tool.id}-prompt`;
+  const imageInputId = `${tool.id}-image`;
+  const sizeId = `${tool.id}-size`;
 
   const fileLabel = useMemo(() => {
     if (!file) {
@@ -49,6 +77,12 @@ export function ToolForm({ tool }: ToolFormProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
     setError("");
     setResult(null);
     setIsSubmitting(true);
@@ -67,20 +101,18 @@ export function ToolForm({ tool }: ToolFormProps) {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json()) as {
-        image?: GeneratedImage;
-        error?: string;
-      };
+      const payload = await readImageGenerationPayload(response);
 
       if (!response.ok || !payload.image) {
-        throw new Error(payload.error || "图片生成失败，请稍后重试。");
+        throw new Error(payload.error || genericErrorMessage);
       }
 
       setResultSize(size);
       setResult(payload.image);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "图片生成失败，请稍后重试。");
+      setError(caught instanceof Error ? caught.message : genericErrorMessage);
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -91,42 +123,59 @@ export function ToolForm({ tool }: ToolFormProps) {
         onSubmit={handleSubmit}
         className="rounded-lg border border-stone-300 bg-white/80 p-5 shadow-sm"
       >
-        <label className="block text-sm font-semibold text-stone-900">
+        <label
+          htmlFor={promptId}
+          className="block text-sm font-semibold text-stone-900"
+        >
           {tool.promptLabel}
         </label>
         <textarea
+          id={promptId}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder={tool.promptPlaceholder}
+          required={tool.promptRequired}
+          disabled={isSubmitting}
           rows={7}
-          className="mt-3 w-full resize-none rounded-md border border-stone-300 bg-white px-4 py-3 text-base leading-7 text-stone-950 outline-none transition focus:border-stone-950"
+          className="mt-3 w-full resize-none rounded-md border border-stone-300 bg-white px-4 py-3 text-base leading-7 text-stone-950 outline-none transition focus:border-stone-950 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
         />
 
         {(tool.imageRequired || tool.mode === "edit") && (
-          <label className="mt-5 block">
+          <label
+            htmlFor={imageInputId}
+            className={`group mt-5 block ${isSubmitting ? "cursor-not-allowed opacity-70" : ""}`}
+          >
             <span className="text-sm font-semibold text-stone-900">
               {tool.imageLabel}
             </span>
-            <span className="mt-3 flex min-h-28 items-center gap-3 rounded-md border border-dashed border-stone-400 bg-stone-50 px-4 py-4 text-stone-600 transition hover:border-stone-950">
+            <span className="mt-3 flex min-h-28 items-center gap-3 rounded-md border border-dashed border-stone-400 bg-stone-50 px-4 py-4 text-stone-600 transition group-focus-within:border-stone-950 group-focus-within:ring-2 group-focus-within:ring-stone-950/20 group-hover:border-stone-950">
               <Upload aria-hidden="true" className="h-5 w-5 shrink-0" />
               <span className="min-w-0 truncate">{fileLabel}</span>
             </span>
             <input
+              id={imageInputId}
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              required={tool.imageRequired}
+              disabled={isSubmitting}
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               className="sr-only"
             />
           </label>
         )}
 
-        <label className="mt-5 block text-sm font-semibold text-stone-900">
+        <label
+          htmlFor={sizeId}
+          className="mt-5 block text-sm font-semibold text-stone-900"
+        >
           输出尺寸
         </label>
         <select
+          id={sizeId}
           value={size}
           onChange={(event) => setSize(event.target.value as ImageSize)}
-          className="mt-3 w-full rounded-md border border-stone-300 bg-white px-4 py-3 text-stone-950 outline-none transition focus:border-stone-950"
+          disabled={isSubmitting}
+          className="mt-3 w-full rounded-md border border-stone-300 bg-white px-4 py-3 text-stone-950 outline-none transition focus:border-stone-950 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500"
         >
           {tool.sizeOptions.map((option) => (
             <option key={option} value={option}>
@@ -138,7 +187,9 @@ export function ToolForm({ tool }: ToolFormProps) {
         {error && (
           <div className="mt-5 flex gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">
             <AlertCircle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
-            <p>{error}</p>
+            <p className="min-w-0 break-words [overflow-wrap:anywhere]">
+              {error}
+            </p>
           </div>
         )}
 
@@ -168,7 +219,7 @@ export function ToolForm({ tool }: ToolFormProps) {
               className="mx-auto h-auto max-h-[32rem] w-auto max-w-full rounded-md object-contain"
             />
             {result.revisedPrompt && (
-              <p className="mt-4 text-sm leading-6 text-stone-300">
+              <p className="mt-4 break-words text-sm leading-6 text-stone-300 [overflow-wrap:anywhere]">
                 {result.revisedPrompt}
               </p>
             )}

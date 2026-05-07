@@ -15,6 +15,7 @@ export type ImageTool = {
   accent: "teal" | "red" | "blue" | "gold";
   promptLabel: string;
   promptPlaceholder: string;
+  promptRequired: boolean;
   imageRequired: boolean;
   imageLabel: string;
   defaultSize: ImageSize;
@@ -34,6 +35,7 @@ export const imageTools: ImageTool[] = [
     promptLabel: "画面描述",
     promptPlaceholder:
       "例如：一间清晨阳光里的木质咖啡馆，窗边有绿植，写实摄影风格",
+    promptRequired: true,
     imageRequired: false,
     imageLabel: "参考图",
     defaultSize: "1024x1024",
@@ -51,6 +53,7 @@ export const imageTools: ImageTool[] = [
     promptLabel: "修复要求",
     promptPlaceholder:
       "例如：保留人物五官和年代感，修复划痕，提升清晰度，恢复自然色彩",
+    promptRequired: false,
     imageRequired: true,
     imageLabel: "上传旧照片",
     defaultSize: "1024x1024",
@@ -68,6 +71,7 @@ export const imageTools: ImageTool[] = [
     promptLabel: "头像风格",
     promptPlaceholder:
       "例如：商务头像，深色西装，自然微笑，干净灰色背景，柔和棚拍光",
+    promptRequired: true,
     imageRequired: false,
     imageLabel: "上传参考图",
     defaultSize: "1024x1024",
@@ -85,6 +89,7 @@ export const imageTools: ImageTool[] = [
     promptLabel: "商品场景",
     promptPlaceholder:
       "例如：保留商品外观，放在浅色石材台面上，背景是现代厨房，自然日光",
+    promptRequired: false,
     imageRequired: true,
     imageLabel: "上传商品图",
     defaultSize: "1536x1024",
