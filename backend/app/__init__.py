@@ -1,0 +1,1 @@
+"""Image toolbox FastAPI backend."""
