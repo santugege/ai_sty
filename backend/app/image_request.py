@@ -34,7 +34,7 @@ async def validate_image_form(
     image: UploadFile | None,
     api_key: str | None,
 ) -> ValidImageRequest:
-    if not api_key:
+    if not (api_key or "").strip():
         raise ImageRequestError(500, "服务器未配置 OPENAI_API_KEY。")
 
     tool = get_tool_by_id((tool_id or "").strip())
@@ -50,19 +50,19 @@ async def validate_image_form(
     image_type: str | None = None
 
     if image is not None and image.filename:
-        image_bytes = await image.read()
+        image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
 
-        if image_bytes:
-            image_type = image.content_type or ""
-            image_name = image.filename
+        if not image_bytes:
+            raise ImageRequestError(400, "上传的图片为空。")
 
-            if image_type not in SUPPORTED_IMAGE_TYPES:
-                raise ImageRequestError(400, "图片格式仅支持 PNG、JPG 或 WebP。")
+        image_type = image.content_type or ""
+        image_name = image.filename
 
-            if len(image_bytes) > MAX_IMAGE_BYTES:
-                raise ImageRequestError(400, "图片不能超过 10MB。")
-        else:
-            image_bytes = None
+        if image_type not in SUPPORTED_IMAGE_TYPES:
+            raise ImageRequestError(400, "图片格式仅支持 PNG、JPG 或 WebP。")
+
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            raise ImageRequestError(400, "图片不能超过 10MB。")
 
     if tool.image_required and image_bytes is None:
         raise ImageRequestError(400, f"请{tool.image_label}。")

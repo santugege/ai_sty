@@ -26,9 +26,31 @@ def upload_file(content_type="image/png", data=b"image-bytes", filename="input.p
     )
 
 
+class RecordingUpload:
+    filename = "large.png"
+    content_type = "image/png"
+
+    def __init__(self):
+        self.read_sizes = []
+
+    async def read(self, size=-1):
+        self.read_sizes.append(size)
+        return b"x" * (MAX_IMAGE_BYTES + 1)
+
+
 def test_requires_server_api_key():
     try:
         run(validate_image_form("creator", "a quiet studio", "1024x1024", None, None))
+    except ImageRequestError as error:
+        assert error.status_code == 500
+        assert error.message == "服务器未配置 OPENAI_API_KEY。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_blank_server_api_key():
+    try:
+        run(validate_image_form("creator", "a quiet studio", "1024x1024", None, "   "))
     except ImageRequestError as error:
         assert error.status_code == 500
         assert error.message == "服务器未配置 OPENAI_API_KEY。"
@@ -100,6 +122,38 @@ def test_rejects_oversized_uploads():
         assert error.message == "图片不能超过 10MB。"
     else:
         raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_empty_submitted_file_for_optional_image_tool():
+    try:
+        run(
+            validate_image_form(
+                "avatar",
+                "professional headshot",
+                "1024x1024",
+                upload_file(data=b"", filename="empty.png"),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "上传的图片为空。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_bounds_upload_reads_to_max_image_size_plus_one_byte():
+    upload = RecordingUpload()
+
+    try:
+        run(validate_image_form("avatar", "professional headshot", "1024x1024", upload, "key"))
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "图片不能超过 10MB。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+    assert upload.read_sizes == [MAX_IMAGE_BYTES + 1]
 
 
 def test_returns_normalized_valid_request():
