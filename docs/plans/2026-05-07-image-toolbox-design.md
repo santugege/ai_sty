@@ -4,7 +4,7 @@ Date: 2026-05-07
 
 ## Goal
 
-Build a real image generation toolbox website powered by OpenAI image models. The first version should let users choose from several image tools, submit text and optional image uploads, and receive generated or edited images without exposing the OpenAI API key in the browser.
+Build a real image generation toolbox website powered by OpenAI image models. The first version lets users choose an image tool, submit text and optional image uploads, and receive generated or edited images without exposing the OpenAI API key in the browser.
 
 ## Product Shape
 
@@ -19,35 +19,57 @@ Each tool has its own page, but the pages are driven by shared configuration so 
 
 ## Architecture
 
-Use Next.js App Router, TypeScript, and Tailwind CSS.
+Use a separated frontend and Python backend:
 
-- Frontend: toolbox home page, tool detail pages, dynamic forms, upload controls, generation status, error messages, and image results.
-- Backend: a Next.js API route at `/api/images/generate`.
-- Configuration: a tool registry defines each tool's route, label, required fields, whether image upload is required, default prompt guidance, size options, and output defaults.
-- Secrets: `OPENAI_API_KEY` is stored in server environment variables, such as `.env.local` during local development.
+- `frontend/`: Next.js App Router, TypeScript, and Tailwind CSS.
+- `backend/`: FastAPI, OpenAI Python SDK, pytest, and environment-based configuration.
+- Frontend responsibilities: toolbox home page, tool detail pages, dynamic forms, upload controls, generation status, error messages, and image results.
+- Backend responsibilities: request validation, file validation, prompt composition, OpenAI Images API calls, and stable JSON responses.
+- Secrets: `OPENAI_API_KEY` is stored only in the Python backend environment, such as `backend/.env` during local development.
 
 The frontend never receives or stores the OpenAI API key.
+
+## Project Structure
+
+The implementation should use this layout:
+
+- `frontend/src/app/page.tsx`: toolbox homepage.
+- `frontend/src/app/tools/[toolId]/page.tsx`: dynamic tool page.
+- `frontend/src/components/tool-card.tsx`: homepage tool card.
+- `frontend/src/components/tool-form.tsx`: client form, upload, submit state, errors, and result display.
+- `frontend/src/lib/tools.ts`: frontend display registry for the four tools.
+- `backend/app/main.py`: FastAPI app and `POST /api/images/generate`.
+- `backend/app/tools.py`: backend tool registry with ids matching the frontend.
+- `backend/app/image_request.py`: form validation, image validation, and prompt composition.
+- `backend/app/openai_images.py`: OpenAI image generation and editing wrapper.
+- `backend/tests/`: backend unit tests.
 
 ## Data Flow
 
 1. The user selects a tool from the homepage.
-2. The tool page renders fields from the tool registry.
-3. The browser submits a `FormData` request with the tool id, prompt, selected size, and optional uploaded image.
-4. `/api/images/generate` validates the request.
-5. The server builds the OpenAI image request using the selected tool configuration.
+2. The tool page renders fields from the frontend tool registry.
+3. The browser submits a `FormData` request to the FastAPI backend with the tool id, prompt, selected size, and optional uploaded image.
+4. `POST /api/images/generate` validates the request.
+5. The backend builds the OpenAI image request using the selected tool configuration.
 6. OpenAI returns image data.
-7. The API route returns a displayable result to the frontend.
+7. FastAPI returns `{ image: { src, mimeType, revisedPrompt } }` or `{ error }`.
 8. The page renders the generated image and allows another generation.
+
+Local development uses:
+
+- Frontend: `http://localhost:3000`.
+- Backend: `http://localhost:8000`.
+- Frontend environment: `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`.
 
 ## OpenAI Integration
 
-Use the OpenAI Images API from the server route. The first implementation should target the GPT image model family and keep the model name centralized in one configuration value so it is easy to upgrade.
+Use the OpenAI Python SDK from the FastAPI backend. The first implementation targets the GPT image model family and keeps the model name centralized in `OPENAI_IMAGE_MODEL`, defaulting to `gpt-image-2`.
 
 Text-only generation is used for AI Image Creator. Image editing is used for restoration, avatar, and product-image flows when an uploaded image is present.
 
 ## Error Handling
 
-The app should display clear user-facing errors for:
+The backend should return stable JSON errors for:
 
 - Missing `OPENAI_API_KEY`.
 - Unknown tool id.
@@ -57,7 +79,7 @@ The app should display clear user-facing errors for:
 - File too large.
 - OpenAI API failures.
 
-Server responses must not expose the API key or internal stack traces.
+Server responses must not expose the API key or internal stack traces. The frontend displays these messages next to the form.
 
 ## UX Direction
 
@@ -69,8 +91,9 @@ Tool pages should keep the form and result area close together. The user should 
 
 Before considering the implementation complete:
 
-- Confirm TypeScript and production build pass.
+- Confirm backend pytest passes.
+- Confirm frontend lint and production build pass.
 - Confirm each tool page renders.
-- Confirm request validation catches missing prompt, missing image, unsupported file type, and missing API key.
-- With a valid `OPENAI_API_KEY`, run at least one real generation request.
+- Confirm backend request validation catches missing prompt, missing image, unsupported file type, oversized file, unknown tool, and missing API key.
+- With a valid `OPENAI_API_KEY`, run at least one real generation request through the FastAPI backend from the frontend.
 
