@@ -1,3 +1,5 @@
+import base64
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -5,6 +7,9 @@ from app.openai_images import GeneratedImageResult
 
 
 client = TestClient(app)
+TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AwAI/AL+p5qgoAAAAABJRU5ErkJggg=="
+)
 
 
 def test_health_route_returns_ok():
@@ -36,6 +41,19 @@ def test_image_route_returns_validation_error(monkeypatch):
 
     assert response.status_code == 400
     assert response.json() == {"error": "请输入画面描述。"}
+
+
+def test_image_route_rejects_upload_for_text_generation_tool(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+        files={"image": ("input.png", TINY_PNG, "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "该工具不支持上传图片。"}
 
 
 def test_image_route_returns_generated_image(monkeypatch):
@@ -119,13 +137,13 @@ def test_image_route_passes_uploaded_image_to_openai_request(monkeypatch):
     response = client.post(
         "/api/images/generate",
         data={"toolId": "restore", "prompt": "修复划痕", "size": "1024x1024"},
-        files={"image": ("photo.png", b"image-bytes", "image/png")},
+        files={"image": ("photo.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 200
     valid_request = captured_request["valid_request"]
     assert valid_request.tool.id == "restore"
-    assert valid_request.image_bytes == b"image-bytes"
+    assert valid_request.image_bytes == TINY_PNG
     assert valid_request.image_name == "photo.png"
     assert valid_request.image_type == "image/png"
 

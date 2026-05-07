@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 
 from fastapi import UploadFile
+from PIL import Image, UnidentifiedImageError
 
 from app.tools import ImageSize, ImageTool, get_tool_by_id
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 SUPPORTED_IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp")
+SUPPORTED_IMAGE_FORMATS_BY_TYPE = {
+    "image/png": "PNG",
+    "image/jpeg": "JPEG",
+    "image/webp": "WEBP",
+}
+INVALID_IMAGE_MESSAGE = "图片内容不是有效的 PNG、JPG 或 WebP。"
 
 
 class ImageRequestError(Exception):
@@ -50,6 +58,9 @@ async def validate_image_form(
     image_type: str | None = None
 
     if image is not None and image.filename:
+        if tool.mode == "generate":
+            raise ImageRequestError(400, "该工具不支持上传图片。")
+
         image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
 
         if not image_bytes:
@@ -63,6 +74,8 @@ async def validate_image_form(
 
         if len(image_bytes) > MAX_IMAGE_BYTES:
             raise ImageRequestError(400, "图片不能超过 10MB。")
+
+        validate_uploaded_image_content(image_bytes, image_type)
 
     if tool.image_required and image_bytes is None:
         raise ImageRequestError(400, f"请{tool.image_label}。")
@@ -89,3 +102,15 @@ def compose_tool_prompt(tool: ImageTool, user_prompt: str) -> str:
         return tool.base_prompt
 
     return f"{tool.base_prompt}\n\nUser request:\n{normalized_prompt}"
+
+
+def validate_uploaded_image_content(image_bytes: bytes, image_type: str) -> None:
+    try:
+        with Image.open(BytesIO(image_bytes)) as uploaded_image:
+            image_format = (uploaded_image.format or "").upper()
+            uploaded_image.verify()
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError):
+        raise ImageRequestError(400, INVALID_IMAGE_MESSAGE) from None
+
+    if image_format != SUPPORTED_IMAGE_FORMATS_BY_TYPE.get(image_type):
+        raise ImageRequestError(400, INVALID_IMAGE_MESSAGE)

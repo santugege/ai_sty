@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from io import BytesIO
 
 from fastapi import UploadFile
@@ -13,12 +14,19 @@ from app.image_request import (
 )
 from app.tools import get_tool_by_id
 
+TINY_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AwAI/AL+p5qgoAAAAABJRU5ErkJggg=="
+)
+BROKEN_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def upload_file(content_type="image/png", data=b"image-bytes", filename="input.png"):
+def upload_file(content_type="image/png", data=TINY_PNG, filename="input.png"):
     return UploadFile(
         filename=filename,
         file=BytesIO(data),
@@ -88,6 +96,24 @@ def test_requires_upload_for_old_photo_restoration():
         raise AssertionError("Expected ImageRequestError")
 
 
+def test_rejects_upload_for_text_generation_tool():
+    try:
+        run(
+            validate_image_form(
+                "creator",
+                "a quiet studio",
+                "1024x1024",
+                upload_file(),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "该工具不支持上传图片。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
 def test_rejects_unsupported_file_types():
     try:
         run(
@@ -102,6 +128,42 @@ def test_rejects_unsupported_file_types():
     except ImageRequestError as error:
         assert error.status_code == 400
         assert error.message == "图片格式仅支持 PNG、JPG 或 WebP。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_mismatched_image_content():
+    try:
+        run(
+            validate_image_form(
+                "restore",
+                "修复划痕",
+                "1024x1024",
+                upload_file(content_type="image/png", data=b"not an image"),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "图片内容不是有效的 PNG、JPG 或 WebP。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_corrupt_image_content():
+    try:
+        run(
+            validate_image_form(
+                "restore",
+                "修复划痕",
+                "1024x1024",
+                upload_file(content_type="image/png", data=BROKEN_PNG),
+                "key",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "图片内容不是有效的 PNG、JPG 或 WebP。"
     else:
         raise AssertionError("Expected ImageRequestError")
 
@@ -162,7 +224,7 @@ def test_returns_normalized_valid_request():
             "restore",
             " 修复划痕 ",
             "1536x1024",
-            upload_file(content_type="image/jpeg", filename="photo.jpg"),
+            upload_file(content_type="image/png", filename="photo.png"),
             "key",
         )
     )
@@ -170,9 +232,9 @@ def test_returns_normalized_valid_request():
     assert result.tool.id == "restore"
     assert result.prompt == "修复划痕"
     assert result.size == "1536x1024"
-    assert result.image_bytes == b"image-bytes"
-    assert result.image_name == "photo.jpg"
-    assert result.image_type == "image/jpeg"
+    assert result.image_bytes == TINY_PNG
+    assert result.image_name == "photo.png"
+    assert result.image_type == "image/png"
 
 
 def test_falls_back_to_default_size_for_invalid_size_input():
