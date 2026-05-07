@@ -1,0 +1,188 @@
+"use client";
+
+import Image from "next/image";
+import { useMemo, useState } from "react";
+import { AlertCircle, ImageIcon, Loader2, Upload } from "lucide-react";
+import type { ImageSize, ImageTool } from "@/lib/tools";
+
+type GeneratedImage = {
+  src: string;
+  mimeType: string;
+  revisedPrompt?: string | null;
+};
+
+type ToolFormProps = {
+  tool: ImageTool;
+};
+
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  "http://localhost:8000";
+
+function getImageDimensions(size: ImageSize) {
+  const [width, height] = size.split("x").map(Number) as [number, number];
+
+  return { width, height };
+}
+
+export function ToolForm({ tool }: ToolFormProps) {
+  const [prompt, setPrompt] = useState("");
+  const [size, setSize] = useState<ImageSize>(tool.defaultSize);
+  const [resultSize, setResultSize] = useState<ImageSize>(tool.defaultSize);
+  const [file, setFile] = useState<File | null>(null);
+  const [result, setResult] = useState<GeneratedImage | null>(null);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const fileLabel = useMemo(() => {
+    if (!file) {
+      return tool.imageRequired ? "请选择图片文件" : "可选上传参考图";
+    }
+
+    return file.name;
+  }, [file, tool.imageRequired]);
+
+  const previewDimensions = useMemo(
+    () => getImageDimensions(resultSize),
+    [resultSize],
+  );
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setResult(null);
+    setIsSubmitting(true);
+
+    const formData = new FormData();
+    formData.append("toolId", tool.id);
+    formData.append("prompt", prompt);
+    formData.append("size", size);
+
+    if (file) {
+      formData.append("image", file);
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/images/generate`, {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as {
+        image?: GeneratedImage;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.image) {
+        throw new Error(payload.error || "图片生成失败，请稍后重试。");
+      }
+
+      setResultSize(size);
+      setResult(payload.image);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "图片生成失败，请稍后重试。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <form
+        onSubmit={handleSubmit}
+        className="rounded-lg border border-stone-300 bg-white/80 p-5 shadow-sm"
+      >
+        <label className="block text-sm font-semibold text-stone-900">
+          {tool.promptLabel}
+        </label>
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder={tool.promptPlaceholder}
+          rows={7}
+          className="mt-3 w-full resize-none rounded-md border border-stone-300 bg-white px-4 py-3 text-base leading-7 text-stone-950 outline-none transition focus:border-stone-950"
+        />
+
+        {(tool.imageRequired || tool.mode === "edit") && (
+          <label className="mt-5 block">
+            <span className="text-sm font-semibold text-stone-900">
+              {tool.imageLabel}
+            </span>
+            <span className="mt-3 flex min-h-28 items-center gap-3 rounded-md border border-dashed border-stone-400 bg-stone-50 px-4 py-4 text-stone-600 transition hover:border-stone-950">
+              <Upload aria-hidden="true" className="h-5 w-5 shrink-0" />
+              <span className="min-w-0 truncate">{fileLabel}</span>
+            </span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              className="sr-only"
+            />
+          </label>
+        )}
+
+        <label className="mt-5 block text-sm font-semibold text-stone-900">
+          输出尺寸
+        </label>
+        <select
+          value={size}
+          onChange={(event) => setSize(event.target.value as ImageSize)}
+          className="mt-3 w-full rounded-md border border-stone-300 bg-white px-4 py-3 text-stone-950 outline-none transition focus:border-stone-950"
+        >
+          {tool.sizeOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+
+        {error && (
+          <div className="mt-5 flex gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800">
+            <AlertCircle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
+            <p>{error}</p>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-stone-950 px-5 py-3 text-base font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-500"
+        >
+          {isSubmitting ? (
+            <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
+          ) : (
+            <ImageIcon aria-hidden="true" className="h-5 w-5" />
+          )}
+          {isSubmitting ? "生成中" : "生成图片"}
+        </button>
+      </form>
+
+      <section className="grid min-h-[34rem] place-items-center rounded-lg border border-stone-300 bg-stone-950 p-4 text-white shadow-sm">
+        {result ? (
+          <div className="w-full">
+            <Image
+              unoptimized
+              src={result.src}
+              alt={`${tool.title}生成结果`}
+              width={previewDimensions.width}
+              height={previewDimensions.height}
+              className="mx-auto h-auto max-h-[32rem] w-auto max-w-full rounded-md object-contain"
+            />
+            {result.revisedPrompt && (
+              <p className="mt-4 text-sm leading-6 text-stone-300">
+                {result.revisedPrompt}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="max-w-sm text-center">
+            <ImageIcon aria-hidden="true" className="mx-auto h-10 w-10 text-stone-400" />
+            <p className="mt-4 text-xl font-semibold">结果会显示在这里</p>
+            <p className="mt-3 text-sm leading-6 text-stone-400">
+              提交后请等待图片模型完成生成，复杂图片可能需要较长时间。
+            </p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
