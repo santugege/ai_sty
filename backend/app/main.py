@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.image_request import ImageRequestError, validate_image_form
 from app.openai_images import request_image_from_openai
@@ -42,7 +43,8 @@ async def generate_image(
     try:
         api_key = os.getenv("OPENAI_API_KEY")
         valid_request = await validate_image_form(toolId, prompt, size, image, api_key)
-        generated = request_image_from_openai(
+        generated = await run_in_threadpool(
+            request_image_from_openai,
             valid_request,
             api_key=api_key or "",
             model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2"),
