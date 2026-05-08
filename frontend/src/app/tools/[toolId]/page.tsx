@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
+import { ProductWorkbench } from "@/components/product-workbench";
 import { ToolForm } from "@/components/tool-form";
 import { getToolById, imageTools } from "@/lib/tools";
 
@@ -58,7 +59,11 @@ export default async function ToolPage({ params }: ToolPageProps) {
       </header>
 
       <section className="py-8">
-        <ToolForm tool={tool} />
+        {tool.id === "product" ? (
+          <ProductWorkbench tool={tool} />
+        ) : (
+          <ToolForm tool={tool} />
+        )}
       </section>
     </main>
   );
