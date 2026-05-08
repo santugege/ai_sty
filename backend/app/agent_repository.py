@@ -113,6 +113,20 @@ class AgentRepository:
         session.current_version_id = version.id
         self.db.commit()
 
+    def delete_session(self, session_id: uuid.UUID) -> None:
+        session = self.db.get(AgentSessionRow, session_id)
+        if session is None:
+            return
+
+        self.db.query(AgentMessageRow).filter(
+            AgentMessageRow.session_id == session_id
+        ).delete(synchronize_session=False)
+        self.db.query(ImageVersionRow).filter(
+            ImageVersionRow.session_id == session_id
+        ).delete(synchronize_session=False)
+        self.db.delete(session)
+        self.db.commit()
+
     def get_session_state(self, session_id: uuid.UUID) -> AgentSessionState | None:
         session = self.db.get(AgentSessionRow, session_id)
         if session is None:

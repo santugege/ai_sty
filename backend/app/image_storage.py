@@ -68,3 +68,6 @@ class LocalImageStorage:
 
     def read_image(self, storage_key: str) -> bytes:
         return (self.root / _validate_storage_key(storage_key)).read_bytes()
+
+    def delete_image(self, storage_key: str) -> None:
+        (self.root / _validate_storage_key(storage_key)).unlink(missing_ok=True)

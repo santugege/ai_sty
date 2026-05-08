@@ -55,17 +55,22 @@ class ImageAgentService:
 
         session = self.repo.create_session(title=instruction[:80] or "Image session")
         stored = self.storage.write_image(image_bytes, mime_type=mime_type)
-        initial = self.repo.add_image_version(
-            session.id,
-            None,
-            stored.storage_key,
-            stored.mime_type,
-            "Initial upload",
-            "user-upload",
-        )
-        self.repo.set_current_version(session.id, initial.id)
-        self.repo.add_message(session.id, "user", instruction)
-        return self._run_turn(session.id, instruction, size)
+        try:
+            initial = self.repo.add_image_version(
+                session.id,
+                None,
+                stored.storage_key,
+                stored.mime_type,
+                "Initial upload",
+                "user-upload",
+            )
+            self.repo.set_current_version(session.id, initial.id)
+            self.repo.add_message(session.id, "user", instruction)
+            return self._run_turn(session.id, instruction, size)
+        except Exception:
+            self.repo.delete_session(session.id)
+            self.storage.delete_image(stored.storage_key)
+            raise
 
     def send_message(
         self, session_id: uuid.UUID, instruction: str, size: str

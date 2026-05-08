@@ -1,7 +1,8 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from app.agent_models import AgentMessageRow, AgentSessionRow, ImageVersionRow
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.agent_openai import AgentTurnDecision
@@ -157,6 +158,34 @@ def test_send_message_rejects_session_without_active_image_before_writing_user_m
 
     state = repo.get_session_state(session.id)
     assert state.messages == []
+
+
+def test_create_session_cleans_up_first_turn_failure(tmp_path):
+    service, repo = make_service(
+        tmp_path,
+        AgentTurnDecision(
+            action="edit",
+            assistant_message="I edited the image.",
+            tool_name="missing_tool",
+            tool_instruction="Make it brighter.",
+            response_id="resp_failed",
+        ),
+        tool={},
+    )
+
+    with pytest.raises(AgentServiceError, match="not available"):
+        service.create_session(
+            instruction="Make it brighter",
+            image_bytes=b"initial",
+            image_name="product.png",
+            mime_type="image/png",
+            size="1536x1024",
+        )
+
+    assert repo.db.scalars(select(AgentSessionRow)).all() == []
+    assert repo.db.scalars(select(AgentMessageRow)).all() == []
+    assert repo.db.scalars(select(ImageVersionRow)).all() == []
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_missing_edit_tool_does_not_persist_assistant_turn(tmp_path):

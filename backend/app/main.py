@@ -18,7 +18,13 @@ from app.agent_service import AgentInputError, AgentServiceError, ImageAgentServ
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
 from app.db import SessionLocal
 from app.image_storage import LocalImageStorage
-from app.image_request import ImageRequestError, validate_image_form
+from app.image_request import (
+    MAX_IMAGE_BYTES,
+    SUPPORTED_IMAGE_TYPES,
+    ImageRequestError,
+    validate_image_form,
+    validate_uploaded_image_content,
+)
 from app.openai_images import request_image_from_openai
 
 load_dotenv()
@@ -61,6 +67,9 @@ def agent_error_response(error: Exception) -> JSONResponse:
     if isinstance(error, AgentInputError):
         return JSONResponse({"error": str(error)}, status_code=error.status_code)
 
+    if isinstance(error, ImageRequestError):
+        return JSONResponse({"error": error.message}, status_code=error.status_code)
+
     logger.exception("Agent service failed")
     if isinstance(error, AgentServiceError):
         return JSONResponse({"error": str(error)}, status_code=error.status_code)
@@ -73,6 +82,22 @@ def run_agent_service(method_name: str, *args, **kwargs):
         service = build_agent_service(db)
         method = getattr(service, method_name)
         return method(*args, **kwargs)
+
+
+async def read_agent_upload(image: UploadFile) -> tuple[bytes, str, str]:
+    image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
+    if not image_bytes:
+        raise AgentInputError("Please upload the initial product image.")
+
+    mime_type = image.content_type or ""
+    if mime_type not in SUPPORTED_IMAGE_TYPES:
+        raise ImageRequestError(400, "鍥剧墖鏍煎紡浠呮敮鎸?PNG銆丣PG 鎴?WebP銆?")
+
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise ImageRequestError(400, "鍥剧墖涓嶈兘瓒呰繃 10MB銆?")
+
+    validate_uploaded_image_content(image_bytes, mime_type)
+    return image_bytes, image.filename or "product.png", mime_type
 
 
 @app.get("/health")
@@ -89,14 +114,14 @@ async def create_agent_session(
     try:
         if image is None:
             raise AgentInputError("Please upload the initial product image.")
-        image_bytes = await image.read()
+        image_bytes, image_name, mime_type = await read_agent_upload(image)
         envelope = await run_in_threadpool(
             run_agent_service,
             "create_session",
             instruction=instruction,
             image_bytes=image_bytes,
-            image_name=image.filename or "product.png",
-            mime_type=image.content_type or "image/png",
+            image_name=image_name,
+            mime_type=mime_type,
             size=size,
         )
         return envelope.model_dump(mode="json")
