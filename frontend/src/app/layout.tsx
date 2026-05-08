@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Image Toolbox",
+  title: "电商商品图工作台",
   description:
-    "AI image creation, photo restoration, portraits, and product visuals powered by OpenAI image models.",
+    "按平台、用途、卖点和场景生成电商商品图的 AI 图片工作台。",
 };
 
 export default function RootLayout({

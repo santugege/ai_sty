@@ -2,15 +2,16 @@
 
 :root {
   color-scheme: light;
-  --ink: #171717;
-  --muted: #646464;
-  --paper: #f7f3ea;
-  --panel: #fffdf8;
-  --line: #ddd5c7;
-  --teal: #0f766e;
-  --red: #be3b37;
-  --blue: #2563eb;
+  --ink: #18181b;
+  --muted: #71717a;
+  --paper: #f4f5f0;
+  --panel: #ffffff;
+  --line: #d7d9cf;
+  --accent: #e0452f;
+  --accent-ink: #7f1d1d;
   --gold: #b7791f;
+  --teal: #0f766e;
+  --blue: #2563eb;
 }
 
 * {
@@ -20,16 +21,21 @@
 html {
   min-height: 100%;
   background:
-    linear-gradient(135deg, rgba(15, 118, 110, 0.08), transparent 34%),
-    linear-gradient(315deg, rgba(190, 59, 55, 0.08), transparent 32%),
+    linear-gradient(90deg, rgba(24, 24, 27, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(24, 24, 27, 0.035) 1px, transparent 1px),
     var(--paper);
+  background-size: 28px 28px;
 }
 
 body {
   min-height: 100vh;
   margin: 0;
   color: var(--ink);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  font-family:
+    "Microsoft YaHei",
+    "PingFang SC",
+    "Noto Sans CJK SC",
+    sans-serif;
 }
 
 button,
@@ -43,7 +49,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+}
+
 ::selection {
   color: white;
-  background: var(--teal);
+  background: var(--accent);
 }
