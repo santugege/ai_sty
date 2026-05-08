@@ -37,63 +37,71 @@ export default function Home() {
       </header>
 
       {productTool && (
-        <section className="grid gap-5 py-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
-          <Link
-            href="/tools/product"
-            className="group overflow-hidden rounded-lg border border-zinc-950 bg-zinc-950 text-white shadow-xl transition hover:-translate-y-0.5"
-          >
-            <div className="grid min-h-[25rem] gap-6 p-6 sm:p-8 lg:grid-cols-[minmax(0,0.8fr)_minmax(18rem,0.65fr)]">
-              <div className="flex flex-col justify-between gap-8">
-                <div>
-                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-md bg-white text-zinc-950">
-                    <ImagePlus aria-hidden="true" className="h-6 w-6" />
+        <>
+          <section className="grid gap-5 py-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+            <Link
+              href="/tools/product"
+              className="group overflow-hidden rounded-lg border border-zinc-950 bg-zinc-950 text-white shadow-xl transition hover:-translate-y-0.5"
+            >
+              <div className="grid min-h-[25rem] gap-6 p-6 sm:p-8 lg:grid-cols-[minmax(0,0.8fr)_minmax(18rem,0.65fr)]">
+                <div className="flex flex-col justify-between gap-8">
+                  <div>
+                    <div className="inline-flex h-12 w-12 items-center justify-center rounded-md bg-white text-zinc-950">
+                      <ImagePlus aria-hidden="true" className="h-6 w-6" />
+                    </div>
+                    <p className="mt-6 text-sm font-semibold uppercase tracking-[0.16em] text-zinc-400">
+                      {productTool.eyebrow}
+                    </p>
+                    <h2 className="mt-3 max-w-2xl text-4xl font-semibold leading-tight sm:text-5xl">
+                      按真实平台流程生成商品图
+                    </h2>
+                    <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300">
+                      不再只写一句提示词。先选平台和用途，再补卖点、场景、促销和保真要求，让模型按运营目标工作。
+                    </p>
                   </div>
-                  <p className="mt-6 text-sm font-semibold uppercase tracking-[0.16em] text-zinc-400">
-                    {productTool.eyebrow}
-                  </p>
-                  <h2 className="mt-3 max-w-2xl text-4xl font-semibold leading-tight sm:text-5xl">
-                    按真实平台流程生成商品图
-                  </h2>
-                  <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300">
-                    不再只写一句提示词。先选平台和用途，再补卖点、场景、促销和保真要求，让模型按运营目标工作。
-                  </p>
+                  <span className="inline-flex w-fit items-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-semibold text-zinc-950 transition group-hover:bg-amber-200">
+                    打开商品图工作台
+                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                  </span>
                 </div>
-                <span className="inline-flex w-fit items-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-semibold text-zinc-950 transition group-hover:bg-amber-200">
-                  打开商品图工作台
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                </span>
-              </div>
 
-              <div className="grid content-start gap-3">
-                <PreviewPanel
-                  icon={<BadgePercent aria-hidden="true" className="h-4 w-4" />}
-                  title="平台风格"
-                  items={productPlatformStyles.map((item) => item.label)}
-                />
-                <PreviewPanel
-                  icon={<Layers3 aria-hidden="true" className="h-4 w-4" />}
-                  title="图片用途"
-                  items={productImagePurposes.map((item) => item.label)}
-                />
-                <div className="rounded-lg border border-white/15 bg-white/10 p-4">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <Sparkles aria-hidden="true" className="h-4 w-4" />
-                    一次提交完整运营需求
+                <div className="grid content-start gap-3">
+                  <PreviewPanel
+                    icon={
+                      <BadgePercent aria-hidden="true" className="h-4 w-4" />
+                    }
+                    title="平台风格"
+                    items={productPlatformStyles.map((item) => item.label)}
+                  />
+                  <PreviewPanel
+                    icon={<Layers3 aria-hidden="true" className="h-4 w-4" />}
+                    title="图片用途"
+                    items={productImagePurposes.map((item) => item.label)}
+                  />
+                  <div className="rounded-lg border border-white/15 bg-white/10 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                      <Sparkles aria-hidden="true" className="h-4 w-4" />
+                      一次提交完整运营需求
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-zinc-300">
+                      商品类目、核心卖点、促销文案、必须保留和禁止元素都会进入后端结构化 prompt。
+                    </p>
                   </div>
-                  <p className="mt-3 text-sm leading-6 text-zinc-300">
-                    商品类目、核心卖点、促销文案、必须保留和禁止元素都会进入后端结构化 prompt。
-                  </p>
                 </div>
               </div>
-            </div>
-          </Link>
+            </Link>
 
-          <aside className="grid gap-4">
-            {supportingTools.map((tool) => (
-              <ToolCard key={tool.id} tool={tool} />
-            ))}
-          </aside>
-        </section>
+            <aside className="grid gap-4">
+              {supportingTools.map((tool) => (
+                <ToolCard key={tool.id} tool={tool} />
+              ))}
+            </aside>
+          </section>
+
+          <div className="-mt-1 mb-6 rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm">
+            <a href="/agent">多轮图片 Agent</a>
+          </div>
+        </>
       )}
     </main>
   );
