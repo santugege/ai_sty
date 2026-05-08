@@ -23,7 +23,11 @@ def request_image_from_openai(
     client_factory: Callable[..., Any] = OpenAI,
 ) -> GeneratedImageResult:
     client = client_factory(api_key=api_key)
-    prompt = compose_tool_prompt(request.tool, request.prompt)
+    prompt = compose_tool_prompt(
+        request.tool,
+        request.prompt,
+        request.product_fields,
+    )
 
     if request.image_bytes:
         image_file = BytesIO(request.image_bytes)

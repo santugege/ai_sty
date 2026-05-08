@@ -166,3 +166,41 @@ def test_image_route_sanitizes_unexpected_error_message(monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"error": "图片生成失败，请稍后重试。"}
+def test_image_route_passes_product_fields_to_openai_request(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    captured_request = {}
+
+    def fake_request_image_from_openai(valid_request, api_key, model):
+        captured_request["valid_request"] = valid_request
+        return GeneratedImageResult(src="data:image/png;base64,product")
+
+    monkeypatch.setattr(
+        "app.main.request_image_from_openai",
+        fake_request_image_from_openai,
+    )
+
+    response = client.post(
+        "/api/images/generate",
+        data={
+            "toolId": "product",
+            "prompt": "保留瓶身居中",
+            "size": "1536x1024",
+            "platformStyle": "pinduoduo",
+            "imagePurpose": "promotion-image",
+            "productCategory": "小家电",
+            "sellingPoints": "三档风力，静音，USB 充电",
+            "sceneStyle": "夏季桌面",
+            "visualTone": "高转化促销",
+            "promotionText": "限时立减 20 元",
+            "preserveRequirements": "保留品牌 logo",
+            "avoidElements": "不要额外配件",
+        },
+        files={"image": ("product.png", TINY_PNG, "image/png")},
+    )
+
+    assert response.status_code == 200
+    valid_request = captured_request["valid_request"]
+    assert valid_request.tool.id == "product"
+    assert valid_request.product_fields.platform_style == "pinduoduo"
+    assert valid_request.product_fields.image_purpose == "promotion-image"
+    assert valid_request.product_fields.product_category == "小家电"

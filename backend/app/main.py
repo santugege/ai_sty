@@ -38,11 +38,35 @@ async def generate_image(
     toolId: str = Form(...),
     prompt: str = Form(""),
     size: str = Form(""),
+    platformStyle: str = Form(""),
+    imagePurpose: str = Form(""),
+    productCategory: str = Form(""),
+    sellingPoints: str = Form(""),
+    sceneStyle: str = Form(""),
+    visualTone: str = Form(""),
+    promotionText: str = Form(""),
+    preserveRequirements: str = Form(""),
+    avoidElements: str = Form(""),
     image: UploadFile | None = File(None),
 ):
     try:
         api_key = os.getenv("OPENAI_API_KEY")
-        valid_request = await validate_image_form(toolId, prompt, size, image, api_key)
+        valid_request = await validate_image_form(
+            toolId,
+            prompt,
+            size,
+            image,
+            api_key,
+            platform_style=platformStyle,
+            image_purpose=imagePurpose,
+            product_category=productCategory,
+            selling_points=sellingPoints,
+            scene_style=sceneStyle,
+            visual_tone=visualTone,
+            promotion_text=promotionText,
+            preserve_requirements=preserveRequirements,
+            avoid_elements=avoidElements,
+        )
         generated = await run_in_threadpool(
             request_image_from_openai,
             valid_request,

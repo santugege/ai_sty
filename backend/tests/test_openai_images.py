@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.image_request import ValidImageRequest
+from app.image_request import ProductImageFields, ValidImageRequest
 from app.openai_images import normalize_openai_image_response, request_image_from_openai
 from app.tools import get_tool_by_id
 
@@ -103,3 +103,41 @@ def test_requests_image_edit_when_uploaded_image_is_present():
     assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
     assert fake_client.images.edit_kwargs["image"].name == "photo.png"
     assert "修复划痕" in fake_client.images.edit_kwargs["prompt"]
+def test_requests_image_edit_with_structured_product_prompt():
+    class FakeImages:
+        def __init__(self):
+            self.edit_kwargs = None
+
+        def edit(self, **kwargs):
+            self.edit_kwargs = kwargs
+            return {"data": [{"b64_json": "product"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+
+    result = request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("product"),
+            prompt="保留瓶身居中",
+            size="1536x1024",
+            image_bytes=b"image-bytes",
+            image_name="product.png",
+            image_type="image/png",
+            product_fields=ProductImageFields(
+                platform_style="pinduoduo",
+                image_purpose="promotion-image",
+                product_category="小家电",
+                selling_points="三档风力",
+            ),
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
+
+    assert result.src == "data:image/png;base64,product"
+    assert "Platform style (拼多多):" in fake_client.images.edit_kwargs["prompt"]
+    assert "Product category: 小家电" in fake_client.images.edit_kwargs["prompt"]
