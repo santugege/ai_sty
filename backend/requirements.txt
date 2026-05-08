@@ -6,3 +6,6 @@ python-multipart
 Pillow
 pytest
 httpx
+sqlalchemy
+psycopg[binary]
+alembic
