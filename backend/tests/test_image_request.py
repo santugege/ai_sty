@@ -9,6 +9,7 @@ from app.image_request import (
     MAX_IMAGE_BYTES,
     SUPPORTED_IMAGE_TYPES,
     ImageRequestError,
+    ProductImageFields,
     compose_tool_prompt,
     validate_image_form,
 )
@@ -260,3 +261,142 @@ def test_compose_tool_prompt_uses_base_prompt_when_optional_prompt_empty():
 
 def test_documents_supported_upload_types():
     assert SUPPORTED_IMAGE_TYPES == ("image/png", "image/jpeg", "image/webp")
+
+
+def test_product_request_normalizes_structured_fields():
+    result = run(
+        validate_image_form(
+            "product",
+            "  保持瓶身居中  ",
+            "1536x1024",
+            upload_file(content_type="image/png", filename="product.png"),
+            "key",
+            platform_style="pinduoduo",
+            image_purpose="promotion-image",
+            product_category="  小家电  ",
+            selling_points="  三档风力，静音，USB 充电  ",
+            scene_style="夏季桌面",
+            visual_tone="高转化促销",
+            promotion_text="限时立减 20 元",
+            preserve_requirements="保留品牌 logo",
+            avoid_elements="不要额外配件",
+        )
+    )
+
+    assert result.tool.id == "product"
+    assert result.prompt == "保持瓶身居中"
+    assert result.product_fields == ProductImageFields(
+        platform_style="pinduoduo",
+        image_purpose="promotion-image",
+        product_category="小家电",
+        selling_points="三档风力，静音，USB 充电",
+        scene_style="夏季桌面",
+        visual_tone="高转化促销",
+        promotion_text="限时立减 20 元",
+        preserve_requirements="保留品牌 logo",
+        avoid_elements="不要额外配件",
+    )
+
+
+def test_product_request_allows_legacy_prompt_without_structured_fields():
+    result = run(
+        validate_image_form(
+            "product",
+            "放在现代厨房里",
+            "1536x1024",
+            upload_file(content_type="image/png", filename="product.png"),
+            "key",
+        )
+    )
+
+    assert result.tool.id == "product"
+    assert result.prompt == "放在现代厨房里"
+    assert result.product_fields is None
+
+
+def test_product_request_rejects_invalid_platform_style():
+    try:
+        run(
+            validate_image_form(
+                "product",
+                "",
+                "1536x1024",
+                upload_file(),
+                "key",
+                platform_style="missing",
+                image_purpose="main-image",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请选择有效的平台风格。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_product_request_rejects_invalid_image_purpose():
+    try:
+        run(
+            validate_image_form(
+                "product",
+                "",
+                "1536x1024",
+                upload_file(),
+                "key",
+                platform_style="pinduoduo",
+                image_purpose="missing",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请选择有效的图片用途。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_non_product_request_ignores_product_fields():
+    result = run(
+        validate_image_form(
+            "restore",
+            "修复划痕",
+            "1024x1024",
+            upload_file(),
+            "key",
+            platform_style="pinduoduo",
+            image_purpose="promotion-image",
+            product_category="小家电",
+        )
+    )
+
+    assert result.tool.id == "restore"
+    assert result.product_fields is None
+
+
+def test_compose_product_prompt_uses_structured_ecommerce_fields():
+    tool = get_tool_by_id("product")
+    prompt = compose_tool_prompt(
+        tool,
+        "保留瓶身居中",
+        ProductImageFields(
+            platform_style="pinduoduo",
+            image_purpose="promotion-image",
+            product_category="小家电",
+            selling_points="三档风力，静音，USB 充电",
+            scene_style="夏季桌面",
+            visual_tone="高转化促销",
+            promotion_text="限时立减 20 元",
+            preserve_requirements="保留品牌 logo",
+            avoid_elements="不要额外配件",
+        ),
+    )
+
+    assert tool.base_prompt in prompt
+    assert "Product preservation rules:" in prompt
+    assert "Platform style (拼多多):" in prompt
+    assert "high-conversion Pinduoduo" in prompt
+    assert "Image purpose (促销图):" in prompt
+    assert "Product category: 小家电" in prompt
+    assert "Selling points: 三档风力，静音，USB 充电" in prompt
+    assert "Promotion text: 限时立减 20 元" in prompt
+    assert "Avoid elements: 不要额外配件" in prompt
+    assert "Additional notes: 保留瓶身居中" in prompt
