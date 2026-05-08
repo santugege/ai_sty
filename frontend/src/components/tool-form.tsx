@@ -4,49 +4,16 @@ import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 import { AlertCircle, ImageIcon, Loader2, Upload } from "lucide-react";
 import type { ImageSize, ImageTool } from "@/lib/tools";
-
-type GeneratedImage = {
-  src: string;
-  mimeType: string;
-  revisedPrompt?: string | null;
-};
+import {
+  genericErrorMessage,
+  getImageDimensions,
+  submitImageGenerationForm,
+  type GeneratedImage,
+} from "@/lib/image-api";
 
 type ToolFormProps = {
   tool: ImageTool;
 };
-
-type ImageGenerationPayload = {
-  image?: GeneratedImage;
-  error?: string;
-};
-
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
-  "http://localhost:8000";
-
-const genericErrorMessage = "图片生成失败，请稍后重试。";
-
-function getImageDimensions(size: ImageSize) {
-  const [width, height] = size.split("x").map(Number) as [number, number];
-
-  return { width, height };
-}
-
-async function readImageGenerationPayload(
-  response: Response,
-): Promise<ImageGenerationPayload> {
-  const contentType = response.headers.get("content-type")?.toLowerCase();
-
-  if (!contentType?.includes("json")) {
-    return {};
-  }
-
-  try {
-    return (await response.json()) as ImageGenerationPayload;
-  } catch {
-    return {};
-  }
-}
 
 export function ToolForm({ tool }: ToolFormProps) {
   const [prompt, setPrompt] = useState("");
@@ -97,18 +64,10 @@ export function ToolForm({ tool }: ToolFormProps) {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/images/generate`, {
-        method: "POST",
-        body: formData,
-      });
-      const payload = await readImageGenerationPayload(response);
-
-      if (!response.ok || !payload.image) {
-        throw new Error(payload.error || genericErrorMessage);
-      }
+      const generatedImage = await submitImageGenerationForm(formData);
 
       setResultSize(size);
-      setResult(payload.image);
+      setResult(generatedImage);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : genericErrorMessage);
     } finally {
