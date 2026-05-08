@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from io import BytesIO
+from typing import Any, Callable, Protocol
+
+from openai import OpenAI
 
 
 @dataclass(frozen=True)
@@ -60,3 +65,39 @@ class GptImage2EditTool:
             revised_prompt=None,
             model=self.image_model,
         )
+
+
+def _read(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def create_openai_image_client(
+    api_key: str,
+    image_model: str,
+    client_factory: Callable[..., Any] = OpenAI,
+) -> Callable[[AgentToolContext], bytes]:
+    def edit_image(context: AgentToolContext) -> bytes:
+        client = client_factory(api_key=api_key)
+        image_file = BytesIO(context.image_bytes)
+        image_file.name = context.image_name
+        response = client.images.edit(
+            model=image_model,
+            image=image_file,
+            prompt=context.instruction,
+            size=context.size,
+            quality="auto",
+        )
+        data = _read(response, "data") or []
+        first_image = data[0] if data else None
+        b64_json = _read(first_image, "b64_json") if first_image is not None else None
+        if not b64_json:
+            raise RuntimeError("OpenAI did not return image data.")
+
+        try:
+            return base64.b64decode(b64_json, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise RuntimeError("OpenAI returned invalid base64 image data.") from error
+
+    return edit_image

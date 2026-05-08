@@ -1,7 +1,14 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.agent_tools import AgentToolContext, AgentToolRegistry, GptImage2EditTool
+import pytest
+
+from app.agent_tools import (
+    AgentToolContext,
+    AgentToolRegistry,
+    GptImage2EditTool,
+    create_openai_image_client,
+)
 from app.agent_schemas import AgentEnvelope
 
 
@@ -117,3 +124,95 @@ def test_agent_envelope_accepts_camel_case_fields_and_dumps_json_safe_values():
     assert dumped["session"]["createdAt"] == "2026-05-08T10:30:00Z"
     assert dumped["messages"][0]["id"] == str(message_id)
     assert dumped["currentImage"]["createdAt"] == "2026-05-08T10:30:00Z"
+
+
+def test_create_openai_image_client_edits_image_with_gpt_image_2():
+    class FakeImages:
+        def __init__(self):
+            self.edit_kwargs = None
+
+        def edit(self, **kwargs):
+            self.edit_kwargs = kwargs
+            return {"data": [{"b64_json": "ZWRpdGVk"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+    image_client = create_openai_image_client(
+        api_key="key",
+        image_model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
+
+    result = image_client(
+        AgentToolContext(
+            image_bytes=b"original",
+            image_name="product.png",
+            mime_type="image/png",
+            instruction="Make it brighter",
+            size="1536x1024",
+        )
+    )
+
+    assert result == b"edited"
+    assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
+    assert fake_client.images.edit_kwargs["prompt"] == "Make it brighter"
+    assert fake_client.images.edit_kwargs["size"] == "1536x1024"
+    assert fake_client.images.edit_kwargs["quality"] == "auto"
+    assert fake_client.images.edit_kwargs["image"].name == "product.png"
+
+
+def test_create_openai_image_client_raises_for_missing_base64_image_response():
+    class FakeImages:
+        def edit(self, **kwargs):
+            return {"data": [{"b64_json": ""}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    image_client = create_openai_image_client(
+        api_key="key",
+        image_model="gpt-image-2",
+        client_factory=lambda api_key: FakeClient(),
+    )
+
+    with pytest.raises(RuntimeError, match="OpenAI did not return image data."):
+        image_client(
+            AgentToolContext(
+                image_bytes=b"original",
+                image_name="product.png",
+                mime_type="image/png",
+                instruction="Make it brighter",
+                size="1536x1024",
+            )
+        )
+
+
+def test_create_openai_image_client_raises_for_invalid_base64_image_response():
+    class FakeImages:
+        def edit(self, **kwargs):
+            return {"data": [{"b64_json": "not base64"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    image_client = create_openai_image_client(
+        api_key="key",
+        image_model="gpt-image-2",
+        client_factory=lambda api_key: FakeClient(),
+    )
+
+    with pytest.raises(RuntimeError, match="OpenAI returned invalid base64 image data."):
+        image_client(
+            AgentToolContext(
+                image_bytes=b"original",
+                image_name="product.png",
+                mime_type="image/png",
+                instruction="Make it brighter",
+                size="1536x1024",
+            )
+        )
