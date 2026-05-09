@@ -91,9 +91,6 @@ async def validate_image_form(
     image_type: str | None = None
 
     if image is not None and image.filename:
-        if tool.mode == "generate":
-            raise ImageRequestError(400, "该工具不支持上传图片。")
-
         image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
 
         if not image_bytes:

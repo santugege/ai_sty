@@ -10,31 +10,22 @@ from app.tools import (
 )
 
 
-def test_defines_four_launch_tools_in_display_order():
-    assert [tool.id for tool in image_tools] == [
-        "creator",
-        "restore",
-        "avatar",
-        "product",
-    ]
+def test_defines_only_product_tool():
+    assert [tool.id for tool in image_tools] == ["product"]
 
 
-def test_marks_creator_as_generation_and_others_as_edit_capable():
-    assert get_tool_by_id("creator").mode == "generate"
-    assert get_tool_by_id("restore").mode == "edit"
-    assert get_tool_by_id("avatar").mode == "edit"
+def test_product_tool_is_edit_capable():
     assert get_tool_by_id("product").mode == "edit"
 
 
-def test_requires_uploads_only_for_restore_and_product():
-    assert get_tool_by_id("creator").image_required is False
-    assert get_tool_by_id("restore").image_required is True
-    assert get_tool_by_id("avatar").image_required is False
+def test_product_tool_requires_upload():
     assert get_tool_by_id("product").image_required is True
 
 
-def test_finds_known_tools_and_rejects_unknown_ids():
-    assert get_tool_by_id("avatar").title == "头像/写真生成"
+def test_removed_tools_are_not_available():
+    assert get_tool_by_id("creator") is None
+    assert get_tool_by_id("restore") is None
+    assert get_tool_by_id("avatar") is None
     assert get_tool_by_id("missing") is None
 
 

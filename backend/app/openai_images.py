@@ -22,6 +22,9 @@ def request_image_from_openai(
     model: str,
     client_factory: Callable[..., Any] = OpenAI,
 ) -> GeneratedImageResult:
+    if not request.image_bytes:
+        raise RuntimeError("商品图生成需要上传商品图。")
+
     client = client_factory(api_key=api_key)
     prompt = compose_tool_prompt(
         request.tool,
@@ -29,20 +32,11 @@ def request_image_from_openai(
         request.product_fields,
     )
 
-    if request.image_bytes:
-        image_file = BytesIO(request.image_bytes)
-        image_file.name = request.image_name or "input.png"
-        response = client.images.edit(
-            model=model,
-            image=image_file,
-            prompt=prompt,
-            size=request.size,
-            quality="auto",
-        )
-        return normalize_openai_image_response(response)
-
-    response = client.images.generate(
+    image_file = BytesIO(request.image_bytes)
+    image_file.name = request.image_name or "input.png"
+    response = client.images.edit(
         model=model,
+        image=image_file,
         prompt=prompt,
         size=request.size,
         quality="auto",

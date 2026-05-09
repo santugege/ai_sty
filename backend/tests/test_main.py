@@ -24,7 +24,7 @@ def test_image_route_returns_missing_key_error(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+        data={"toolId": "product", "prompt": "商品场景", "size": "1536x1024"},
     )
 
     assert response.status_code == 500
@@ -36,14 +36,14 @@ def test_image_route_returns_validation_error(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "creator", "prompt": "   ", "size": "1024x1024"},
+        data={"toolId": "product", "prompt": "商品场景", "size": "1536x1024"},
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "请输入画面描述。"}
+    assert response.json() == {"error": "请上传商品图。"}
 
 
-def test_image_route_rejects_upload_for_text_generation_tool(monkeypatch):
+def test_image_route_rejects_removed_tool_id(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
 
     response = client.post(
@@ -53,7 +53,7 @@ def test_image_route_rejects_upload_for_text_generation_tool(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "该工具不支持上传图片。"}
+    assert response.json() == {"error": "请选择有效的图片工具。"}
 
 
 def test_image_route_returns_generated_image(monkeypatch):
@@ -61,8 +61,9 @@ def test_image_route_returns_generated_image(monkeypatch):
     monkeypatch.setenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
     def fake_request_image_from_openai(valid_request, api_key, model):
-        assert valid_request.tool.id == "creator"
-        assert valid_request.prompt == "a quiet studio"
+        assert valid_request.tool.id == "product"
+        assert valid_request.prompt == "保留瓶身居中"
+        assert valid_request.image_bytes == TINY_PNG
         assert api_key == "key"
         assert model == "gpt-image-2"
         return GeneratedImageResult(src="data:image/png;base64,abc123")
@@ -74,7 +75,8 @@ def test_image_route_returns_generated_image(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+        data={"toolId": "product", "prompt": "保留瓶身居中", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 200
@@ -111,17 +113,18 @@ def test_image_route_offloads_openai_request_to_threadpool(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+        data={"toolId": "product", "prompt": "保留瓶身居中", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 200
     assert offload_calls
     assert offload_calls[0][0] is fake_request_image_from_openai
-    assert offload_calls[0][1][0].tool.id == "creator"
+    assert offload_calls[0][1][0].tool.id == "product"
     assert offload_calls[0][2] == {"api_key": "key", "model": "gpt-image-2"}
 
 
-def test_image_route_passes_uploaded_image_to_openai_request(monkeypatch):
+def test_image_route_passes_uploaded_product_image_to_openai_request(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     captured_request = {}
 
@@ -136,15 +139,15 @@ def test_image_route_passes_uploaded_image_to_openai_request(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "restore", "prompt": "修复划痕", "size": "1024x1024"},
-        files={"image": ("photo.png", TINY_PNG, "image/png")},
+        data={"toolId": "product", "prompt": "保留瓶身居中", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 200
     valid_request = captured_request["valid_request"]
-    assert valid_request.tool.id == "restore"
+    assert valid_request.tool.id == "product"
     assert valid_request.image_bytes == TINY_PNG
-    assert valid_request.image_name == "photo.png"
+    assert valid_request.image_name == "product.png"
     assert valid_request.image_type == "image/png"
 
 
@@ -161,7 +164,8 @@ def test_image_route_sanitizes_unexpected_error_message(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "creator", "prompt": "a quiet studio", "size": "1024x1024"},
+        data={"toolId": "product", "prompt": "保留瓶身居中", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 502

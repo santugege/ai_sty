@@ -32,7 +32,7 @@ def test_raises_stable_error_when_no_image_is_returned():
         normalize_openai_image_response({"data": []})
 
 
-def test_requests_text_generation_without_uploaded_image():
+def test_rejects_openai_request_without_uploaded_product_image():
     class FakeImages:
         def __init__(self):
             self.generate_kwargs = None
@@ -52,28 +52,31 @@ def test_requests_text_generation_without_uploaded_image():
 
     fake_client = FakeClient()
 
-    result = request_image_from_openai(
-        ValidImageRequest(
-            tool=get_tool_by_id("creator"),
-            prompt="a quiet studio",
-            size="1024x1024",
-        ),
-        api_key="key",
-        model="gpt-image-2",
-        client_factory=lambda api_key: fake_client,
-    )
+    with pytest.raises(RuntimeError, match="商品图生成需要上传商品图。"):
+        request_image_from_openai(
+            ValidImageRequest(
+                tool=get_tool_by_id("product"),
+                prompt="商品场景",
+                size="1536x1024",
+            ),
+            api_key="key",
+            model="gpt-image-2",
+            client_factory=lambda api_key: fake_client,
+        )
 
-    assert result.src == "data:image/png;base64,abc123"
-    assert fake_client.images.generate_kwargs["model"] == "gpt-image-2"
-    assert "a quiet studio" in fake_client.images.generate_kwargs["prompt"]
-    assert fake_client.images.generate_kwargs["size"] == "1024x1024"
+    assert fake_client.images.generate_kwargs is None
     assert fake_client.images.edit_kwargs is None
 
 
-def test_requests_image_edit_when_uploaded_image_is_present():
+def test_requests_product_image_edit_when_uploaded_image_is_present():
     class FakeImages:
         def __init__(self):
+            self.generate_kwargs = None
             self.edit_kwargs = None
+
+        def generate(self, **kwargs):
+            self.generate_kwargs = kwargs
+            return {"data": [{"b64_json": "should-not-happen"}]}
 
         def edit(self, **kwargs):
             self.edit_kwargs = kwargs
@@ -87,11 +90,11 @@ def test_requests_image_edit_when_uploaded_image_is_present():
 
     result = request_image_from_openai(
         ValidImageRequest(
-            tool=get_tool_by_id("restore"),
-            prompt="修复划痕",
-            size="1024x1024",
+            tool=get_tool_by_id("product"),
+            prompt="保留瓶身居中",
+            size="1536x1024",
             image_bytes=b"image-bytes",
-            image_name="photo.png",
+            image_name="product.png",
             image_type="image/png",
         ),
         api_key="key",
@@ -101,8 +104,12 @@ def test_requests_image_edit_when_uploaded_image_is_present():
 
     assert result.src == "data:image/png;base64,edited"
     assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
-    assert fake_client.images.edit_kwargs["image"].name == "photo.png"
-    assert "修复划痕" in fake_client.images.edit_kwargs["prompt"]
+    assert fake_client.images.edit_kwargs["image"].name == "product.png"
+    assert "保留瓶身居中" in fake_client.images.edit_kwargs["prompt"]
+    assert fake_client.images.edit_kwargs["size"] == "1536x1024"
+    assert fake_client.images.generate_kwargs is None
+
+
 def test_requests_image_edit_with_structured_product_prompt():
     class FakeImages:
         def __init__(self):

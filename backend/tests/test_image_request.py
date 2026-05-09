@@ -49,7 +49,7 @@ class RecordingUpload:
 
 def test_requires_server_api_key():
     try:
-        run(validate_image_form("creator", "a quiet studio", "1024x1024", None, None))
+        run(validate_image_form("product", "商品场景", "1024x1024", None, None))
     except ImageRequestError as error:
         assert error.status_code == 500
         assert error.message == "服务器未配置 OPENAI_API_KEY。"
@@ -59,7 +59,7 @@ def test_requires_server_api_key():
 
 def test_rejects_blank_server_api_key():
     try:
-        run(validate_image_form("creator", "a quiet studio", "1024x1024", None, "   "))
+        run(validate_image_form("product", "商品场景", "1024x1024", None, "   "))
     except ImageRequestError as error:
         assert error.status_code == 500
         assert error.message == "服务器未配置 OPENAI_API_KEY。"
@@ -77,40 +77,23 @@ def test_rejects_unknown_tool_id():
         raise AssertionError("Expected ImageRequestError")
 
 
-def test_rejects_empty_required_prompt():
+def test_rejects_removed_tool_ids():
+    for tool_id in ("creator", "restore", "avatar"):
+        try:
+            run(validate_image_form(tool_id, "商品场景", "1024x1024", upload_file(), "key"))
+        except ImageRequestError as error:
+            assert error.status_code == 400
+            assert error.message == "请选择有效的图片工具。"
+        else:
+            raise AssertionError("Expected ImageRequestError")
+
+
+def test_requires_upload_for_product_image_generation():
     try:
-        run(validate_image_form("creator", "   ", "1024x1024", None, "key"))
+        run(validate_image_form("product", "商品场景", "1024x1024", None, "key"))
     except ImageRequestError as error:
         assert error.status_code == 400
-        assert error.message == "请输入画面描述。"
-    else:
-        raise AssertionError("Expected ImageRequestError")
-
-
-def test_requires_upload_for_old_photo_restoration():
-    try:
-        run(validate_image_form("restore", "修复划痕", "1024x1024", None, "key"))
-    except ImageRequestError as error:
-        assert error.status_code == 400
-        assert error.message == "请上传旧照片。"
-    else:
-        raise AssertionError("Expected ImageRequestError")
-
-
-def test_rejects_upload_for_text_generation_tool():
-    try:
-        run(
-            validate_image_form(
-                "creator",
-                "a quiet studio",
-                "1024x1024",
-                upload_file(),
-                "key",
-            )
-        )
-    except ImageRequestError as error:
-        assert error.status_code == 400
-        assert error.message == "该工具不支持上传图片。"
+        assert error.message == "请上传商品图。"
     else:
         raise AssertionError("Expected ImageRequestError")
 
@@ -119,8 +102,8 @@ def test_rejects_unsupported_file_types():
     try:
         run(
             validate_image_form(
-                "restore",
-                "修复划痕",
+                "product",
+                "商品场景",
                 "1024x1024",
                 upload_file(content_type="image/gif"),
                 "key",
@@ -137,8 +120,8 @@ def test_rejects_mismatched_image_content():
     try:
         run(
             validate_image_form(
-                "restore",
-                "修复划痕",
+                "product",
+                "商品场景",
                 "1024x1024",
                 upload_file(content_type="image/png", data=b"not an image"),
                 "key",
@@ -155,8 +138,8 @@ def test_rejects_corrupt_image_content():
     try:
         run(
             validate_image_form(
-                "restore",
-                "修复划痕",
+                "product",
+                "商品场景",
                 "1024x1024",
                 upload_file(content_type="image/png", data=BROKEN_PNG),
                 "key",
@@ -173,8 +156,8 @@ def test_rejects_oversized_uploads():
     try:
         run(
             validate_image_form(
-                "restore",
-                "修复划痕",
+                "product",
+                "商品场景",
                 "1024x1024",
                 upload_file(data=b"x" * (MAX_IMAGE_BYTES + 1)),
                 "key",
@@ -187,12 +170,12 @@ def test_rejects_oversized_uploads():
         raise AssertionError("Expected ImageRequestError")
 
 
-def test_rejects_empty_submitted_file_for_optional_image_tool():
+def test_rejects_empty_submitted_product_image():
     try:
         run(
             validate_image_form(
-                "avatar",
-                "professional headshot",
+                "product",
+                "商品场景",
                 "1024x1024",
                 upload_file(data=b"", filename="empty.png"),
                 "key",
@@ -209,7 +192,7 @@ def test_bounds_upload_reads_to_max_image_size_plus_one_byte():
     upload = RecordingUpload()
 
     try:
-        run(validate_image_form("avatar", "professional headshot", "1024x1024", upload, "key"))
+        run(validate_image_form("product", "商品场景", "1024x1024", upload, "key"))
     except ImageRequestError as error:
         assert error.status_code == 400
         assert error.message == "图片不能超过 10MB。"
@@ -222,26 +205,34 @@ def test_bounds_upload_reads_to_max_image_size_plus_one_byte():
 def test_returns_normalized_valid_request():
     result = run(
         validate_image_form(
-            "restore",
-            " 修复划痕 ",
+            "product",
+            " 保持瓶身居中 ",
             "1536x1024",
-            upload_file(content_type="image/png", filename="photo.png"),
+            upload_file(content_type="image/png", filename="product.png"),
             "key",
         )
     )
 
-    assert result.tool.id == "restore"
-    assert result.prompt == "修复划痕"
+    assert result.tool.id == "product"
+    assert result.prompt == "保持瓶身居中"
     assert result.size == "1536x1024"
     assert result.image_bytes == TINY_PNG
-    assert result.image_name == "photo.png"
+    assert result.image_name == "product.png"
     assert result.image_type == "image/png"
 
 
 def test_falls_back_to_default_size_for_invalid_size_input():
-    result = run(validate_image_form("creator", "a quiet studio", "800x800", None, "key"))
+    result = run(
+        validate_image_form(
+            "product",
+            "商品场景",
+            "800x800",
+            upload_file(),
+            "key",
+        )
+    )
 
-    assert result.size == "1024x1024"
+    assert result.size == "1536x1024"
 
 
 def test_compose_tool_prompt_combines_base_prompt_with_user_instructions():
@@ -254,7 +245,7 @@ def test_compose_tool_prompt_combines_base_prompt_with_user_instructions():
 
 
 def test_compose_tool_prompt_uses_base_prompt_when_optional_prompt_empty():
-    tool = get_tool_by_id("restore")
+    tool = get_tool_by_id("product")
 
     assert compose_tool_prompt(tool, "   ") == tool.base_prompt
 
@@ -352,24 +343,6 @@ def test_product_request_rejects_invalid_image_purpose():
         assert error.message == "请选择有效的图片用途。"
     else:
         raise AssertionError("Expected ImageRequestError")
-
-
-def test_non_product_request_ignores_product_fields():
-    result = run(
-        validate_image_form(
-            "restore",
-            "修复划痕",
-            "1024x1024",
-            upload_file(),
-            "key",
-            platform_style="pinduoduo",
-            image_purpose="promotion-image",
-            product_category="小家电",
-        )
-    )
-
-    assert result.tool.id == "restore"
-    assert result.product_fields is None
 
 
 def test_compose_product_prompt_uses_structured_ecommerce_fields():
