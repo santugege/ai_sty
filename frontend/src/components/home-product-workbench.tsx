@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Image as ImageIcon,
   Loader2,
+  MessageSquareText,
   Package,
   Settings2,
   Sparkles,
@@ -44,6 +45,7 @@ type NavItem = {
 
 const topNavItems: NavItem[] = [
   { label: "商品图", href: "/", icon: Package, active: true },
+  { label: "多轮 Agent", href: "/agent", icon: MessageSquareText },
 ];
 
 const bottomNavItems: NavItem[] = [
