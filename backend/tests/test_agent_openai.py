@@ -72,6 +72,40 @@ def test_request_agent_decision_passes_previous_response_id():
     assert calls[0]["previous_response_id"] == "resp_previous"
 
 
+def test_request_agent_decision_passes_base_url_to_client_factory():
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                id="resp_125",
+                output_text=(
+                    '{"action":"clarify","assistant_message":"What should change?",'
+                    '"tool_name":null,"tool_instruction":null}'
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            self.responses = FakeResponses()
+
+    request_agent_decision(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Make it better",
+        current_image_summary="Current product image exists.",
+        recent_messages=[],
+        previous_response_id=None,
+        base_url="https://api.example.test/v1",
+        client_factory=FakeClient,
+    )
+
+    assert calls == [
+        {"api_key": "key", "base_url": "https://api.example.test/v1"}
+    ]
+
+
 def test_request_agent_decision_raises_for_invalid_json_output():
     class FakeResponses:
         def create(self, **kwargs):

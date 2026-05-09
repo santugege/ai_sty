@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import asdict
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +15,10 @@ from app.agent_openai import request_agent_decision
 from app.agent_repository import AgentRepository
 from app.agent_service import AgentInputError, AgentServiceError, ImageAgentService
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
+from app.config import load_backend_env, openai_base_url
+
+load_backend_env()
+
 from app.db import SessionLocal
 from app.image_storage import LocalImageStorage
 from app.image_request import (
@@ -27,15 +30,43 @@ from app.image_request import (
 )
 from app.openai_images import request_image_from_openai
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
+
+
+def frontend_origins() -> list[str]:
+    configured = os.getenv("FRONTEND_ORIGIN", "")
+    origins = [
+        origin.strip()
+        for origin in configured.split(",")
+        if origin.strip()
+    ] or [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    for origin in list(origins):
+        alias = local_origin_alias(origin)
+        if alias and alias not in origins:
+            origins.append(alias)
+    return origins
+
+
+def local_origin_alias(origin: str) -> str | None:
+    parsed = urlsplit(origin)
+    hostname = parsed.hostname
+    if hostname not in {"localhost", "127.0.0.1"}:
+        return None
+    alias_host = "127.0.0.1" if hostname == "localhost" else "localhost"
+    alias_netloc = alias_host
+    if parsed.port:
+        alias_netloc = f"{alias_netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme, alias_netloc, "", "", ""))
+
 
 app = FastAPI(title="Image Toolbox API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")],
+    allow_origins=frontend_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -46,12 +77,18 @@ def build_agent_service(db: Session) -> ImageAgentService:
     api_key = os.getenv("OPENAI_API_KEY") or ""
     image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
     agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.5")
-    image_client = create_openai_image_client(api_key=api_key, image_model=image_model)
+    base_url = openai_base_url()
+    image_client = create_openai_image_client(
+        api_key=api_key,
+        image_model=image_model,
+        base_url=base_url,
+    )
 
     def planner(**kwargs):
         return request_agent_decision(
             api_key=api_key,
             agent_model=agent_model,
+            base_url=base_url,
             **kwargs,
         )
 
@@ -180,6 +217,8 @@ async def generate_image(
     promotionText: str = Form(""),
     preserveRequirements: str = Form(""),
     avoidElements: str = Form(""),
+    aspectRatio: str = Form(""),
+    imageCount: str = Form(""),
     image: UploadFile | None = File(None),
 ):
     try:
@@ -199,20 +238,33 @@ async def generate_image(
             promotion_text=promotionText,
             preserve_requirements=preserveRequirements,
             avoid_elements=avoidElements,
+            aspect_ratio=aspectRatio,
+            image_count=imageCount,
         )
+        image_request_kwargs = {
+            "api_key": api_key or "",
+            "model": os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2"),
+        }
+        base_url = openai_base_url()
+        if base_url:
+            image_request_kwargs["base_url"] = base_url
         generated = await run_in_threadpool(
             request_image_from_openai,
             valid_request,
-            api_key=api_key or "",
-            model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2"),
+            **image_request_kwargs,
         )
-        payload = asdict(generated)
-        return {
-            "image": {
-                "src": payload["src"],
-                "mimeType": payload["mime_type"],
-                "revisedPrompt": payload["revised_prompt"],
+        images_payload = [
+            {
+                "src": image.src,
+                "mimeType": image.mime_type,
+                "revisedPrompt": image.revised_prompt,
             }
+            for image in generated.images
+        ]
+        first_image = images_payload[0]
+        return {
+            "image": first_image,
+            "images": images_payload,
         }
     except ImageRequestError as error:
         return JSONResponse({"error": error.message}, status_code=error.status_code)

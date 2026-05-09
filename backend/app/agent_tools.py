@@ -9,6 +9,8 @@ from typing import Any, Callable, Protocol
 
 from openai import OpenAI
 
+from app.config import openai_client_kwargs
+
 
 @dataclass(frozen=True)
 class AgentToolContext:
@@ -76,10 +78,11 @@ def _read(value: Any, key: str) -> Any:
 def create_openai_image_client(
     api_key: str,
     image_model: str,
+    base_url: str | None = None,
     client_factory: Callable[..., Any] = OpenAI,
 ) -> Callable[[AgentToolContext], bytes]:
     def edit_image(context: AgentToolContext) -> bytes:
-        client = client_factory(api_key=api_key)
+        client = client_factory(**openai_client_kwargs(api_key, base_url))
         image_file = BytesIO(context.image_bytes)
         image_file.name = context.image_name
         response = client.images.edit(

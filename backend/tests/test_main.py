@@ -3,7 +3,8 @@ import base64
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.openai_images import GeneratedImageResult
+from app.main import frontend_origins
+from app.openai_images import GeneratedImageEnvelope, GeneratedImageResult
 
 
 client = TestClient(app)
@@ -17,6 +18,36 @@ def test_health_route_returns_ok():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_frontend_origins_allows_localhost_and_127_by_default(monkeypatch):
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+
+    assert frontend_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
+def test_frontend_origins_allows_comma_separated_values(monkeypatch):
+    monkeypatch.setenv(
+        "FRONTEND_ORIGIN",
+        "http://localhost:3000, http://127.0.0.1:3000",
+    )
+
+    assert frontend_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
+def test_frontend_origins_adds_127_alias_for_localhost(monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", "http://localhost:3000")
+
+    assert frontend_origins() == [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 
 def test_image_route_returns_missing_key_error(monkeypatch):
@@ -36,11 +67,11 @@ def test_image_route_returns_validation_error(monkeypatch):
 
     response = client.post(
         "/api/images/generate",
-        data={"toolId": "product", "prompt": "商品场景", "size": "1536x1024"},
+        data={"toolId": "product", "size": "1536x1024", "imageCount": "3"},
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "请上传商品图。"}
+    assert response.json() == {"error": "生成数量仅支持 1、2 或 4 张。"}
 
 
 def test_image_route_rejects_removed_tool_id(monkeypatch):
@@ -59,6 +90,7 @@ def test_image_route_rejects_removed_tool_id(monkeypatch):
 def test_image_route_returns_generated_image(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         assert valid_request.tool.id == "product"
@@ -66,7 +98,9 @@ def test_image_route_returns_generated_image(monkeypatch):
         assert valid_request.image_bytes == TINY_PNG
         assert api_key == "key"
         assert model == "gpt-image-2"
-        return GeneratedImageResult(src="data:image/png;base64,abc123")
+        return GeneratedImageEnvelope.from_images(
+            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        )
 
     monkeypatch.setattr(
         "app.main.request_image_from_openai",
@@ -85,17 +119,54 @@ def test_image_route_returns_generated_image(monkeypatch):
             "src": "data:image/png;base64,abc123",
             "mimeType": "image/png",
             "revisedPrompt": None,
-        }
+        },
+        "images": [
+            {
+                "src": "data:image/png;base64,abc123",
+                "mimeType": "image/png",
+                "revisedPrompt": None,
+            }
+        ],
     }
+
+
+def test_image_route_passes_openai_base_url_when_configured(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.test/v1")
+    captured_kwargs = {}
+
+    def fake_request_image_from_openai(valid_request, **kwargs):
+        captured_kwargs.update(kwargs)
+        return GeneratedImageEnvelope.from_images(
+            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        )
+
+    monkeypatch.setattr(
+        "app.main.request_image_from_openai",
+        fake_request_image_from_openai,
+    )
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "product", "prompt": "淇濈暀鐡惰韩灞呬腑", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert captured_kwargs["api_key"] == "key"
+    assert captured_kwargs["base_url"] == "https://api.example.test/v1"
 
 
 def test_image_route_offloads_openai_request_to_threadpool(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     offload_calls = []
 
     def fake_request_image_from_openai(valid_request, api_key, model):
-        return GeneratedImageResult(src="data:image/png;base64,abc123")
+        return GeneratedImageEnvelope.from_images(
+            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        )
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
         offload_calls.append((func, args, kwargs))
@@ -126,11 +197,14 @@ def test_image_route_offloads_openai_request_to_threadpool(monkeypatch):
 
 def test_image_route_passes_uploaded_product_image_to_openai_request(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     captured_request = {}
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         captured_request["valid_request"] = valid_request
-        return GeneratedImageResult(src="data:image/png;base64,edited")
+        return GeneratedImageEnvelope.from_images(
+            [GeneratedImageResult(src="data:image/png;base64,edited")]
+        )
 
     monkeypatch.setattr(
         "app.main.request_image_from_openai",
@@ -149,6 +223,65 @@ def test_image_route_passes_uploaded_product_image_to_openai_request(monkeypatch
     assert valid_request.image_bytes == TINY_PNG
     assert valid_request.image_name == "product.png"
     assert valid_request.image_type == "image/png"
+
+
+def test_image_route_allows_generation_without_uploaded_image(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    captured_request = {}
+
+    def fake_request_image_from_openai(valid_request, api_key, model):
+        captured_request["valid_request"] = valid_request
+        return GeneratedImageEnvelope.from_images(
+            [
+                GeneratedImageResult(src="data:image/png;base64,generated-1"),
+                GeneratedImageResult(src="data:image/png;base64,generated-2"),
+            ]
+        )
+
+    monkeypatch.setattr(
+        "app.main.request_image_from_openai",
+        fake_request_image_from_openai,
+    )
+
+    response = client.post(
+        "/api/images/generate",
+        data={
+            "toolId": "product",
+            "prompt": "平台：拼多多",
+            "size": "2048x2048",
+            "platformStyle": "pinduoduo",
+            "imagePurpose": "main-image",
+            "aspectRatio": "1:1",
+            "imageCount": "2",
+        },
+    )
+
+    assert response.status_code == 200
+    valid_request = captured_request["valid_request"]
+    assert valid_request.image_bytes is None
+    assert valid_request.size == "2048x2048"
+    assert valid_request.generation_settings.aspect_ratio == "1:1"
+    assert valid_request.generation_settings.image_count == 2
+    assert response.json() == {
+        "image": {
+            "src": "data:image/png;base64,generated-1",
+            "mimeType": "image/png",
+            "revisedPrompt": None,
+        },
+        "images": [
+            {
+                "src": "data:image/png;base64,generated-1",
+                "mimeType": "image/png",
+                "revisedPrompt": None,
+            },
+            {
+                "src": "data:image/png;base64,generated-2",
+                "mimeType": "image/png",
+                "revisedPrompt": None,
+            },
+        ],
+    }
 
 
 def test_image_route_sanitizes_unexpected_error_message(monkeypatch):
@@ -172,11 +305,14 @@ def test_image_route_sanitizes_unexpected_error_message(monkeypatch):
     assert response.json() == {"error": "图片生成失败，请稍后重试。"}
 def test_image_route_passes_product_fields_to_openai_request(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     captured_request = {}
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         captured_request["valid_request"] = valid_request
-        return GeneratedImageResult(src="data:image/png;base64,product")
+        return GeneratedImageEnvelope.from_images(
+            [GeneratedImageResult(src="data:image/png;base64,product")]
+        )
 
     monkeypatch.setattr(
         "app.main.request_image_from_openai",
@@ -198,6 +334,8 @@ def test_image_route_passes_product_fields_to_openai_request(monkeypatch):
             "promotionText": "限时立减 20 元",
             "preserveRequirements": "保留品牌 logo",
             "avoidElements": "不要额外配件",
+            "aspectRatio": "2:3",
+            "imageCount": "4",
         },
         files={"image": ("product.png", TINY_PNG, "image/png")},
     )
@@ -208,3 +346,5 @@ def test_image_route_passes_product_fields_to_openai_request(monkeypatch):
     assert valid_request.product_fields.platform_style == "pinduoduo"
     assert valid_request.product_fields.image_purpose == "promotion-image"
     assert valid_request.product_fields.product_category == "小家电"
+    assert valid_request.generation_settings.aspect_ratio == "2:3"
+    assert valid_request.generation_settings.image_count == 4

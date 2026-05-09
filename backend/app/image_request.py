@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import cast
 
@@ -25,6 +25,8 @@ SUPPORTED_IMAGE_FORMATS_BY_TYPE = {
     "image/webp": "WEBP",
 }
 INVALID_IMAGE_MESSAGE = "图片内容不是有效的 PNG、JPG 或 WebP。"
+SUPPORTED_ASPECT_RATIOS = ("1:1", "3:2", "2:3", "16:9", "9:16")
+SUPPORTED_IMAGE_COUNTS = (1, 2, 4)
 
 
 class ImageRequestError(Exception):
@@ -48,6 +50,12 @@ class ProductImageFields:
 
 
 @dataclass(frozen=True)
+class ProductGenerationSettings:
+    aspect_ratio: str = ""
+    image_count: int = 1
+
+
+@dataclass(frozen=True)
 class ValidImageRequest:
     tool: ImageTool
     prompt: str
@@ -56,6 +64,9 @@ class ValidImageRequest:
     image_name: str | None = None
     image_type: str | None = None
     product_fields: ProductImageFields | None = None
+    generation_settings: ProductGenerationSettings = field(
+        default_factory=ProductGenerationSettings
+    )
 
 
 async def validate_image_form(
@@ -74,6 +85,8 @@ async def validate_image_form(
     promotion_text: str | None = None,
     preserve_requirements: str | None = None,
     avoid_elements: str | None = None,
+    aspect_ratio: str | None = None,
+    image_count: str | None = None,
 ) -> ValidImageRequest:
     if not (api_key or "").strip():
         raise ImageRequestError(500, "服务器未配置 OPENAI_API_KEY。")
@@ -127,6 +140,10 @@ async def validate_image_form(
         preserve_requirements=preserve_requirements,
         avoid_elements=avoid_elements,
     )
+    generation_settings = validate_generation_settings(
+        aspect_ratio=aspect_ratio,
+        image_count=image_count,
+    )
 
     return ValidImageRequest(
         tool=tool,
@@ -136,6 +153,34 @@ async def validate_image_form(
         image_name=image_name,
         image_type=image_type,
         product_fields=product_fields,
+        generation_settings=generation_settings,
+    )
+
+
+def validate_generation_settings(
+    *,
+    aspect_ratio: str | None,
+    image_count: str | None,
+) -> ProductGenerationSettings:
+    normalized_aspect_ratio = normalize_text(aspect_ratio)
+    if normalized_aspect_ratio and normalized_aspect_ratio not in SUPPORTED_ASPECT_RATIOS:
+        raise ImageRequestError(400, "请选择有效的画面比例。")
+
+    normalized_image_count = normalize_text(image_count)
+    if not normalized_image_count:
+        return ProductGenerationSettings(aspect_ratio=normalized_aspect_ratio)
+
+    try:
+        parsed_image_count = int(normalized_image_count)
+    except ValueError:
+        raise ImageRequestError(400, "生成数量仅支持 1、2 或 4 张。") from None
+
+    if parsed_image_count not in SUPPORTED_IMAGE_COUNTS:
+        raise ImageRequestError(400, "生成数量仅支持 1、2 或 4 张。")
+
+    return ProductGenerationSettings(
+        aspect_ratio=normalized_aspect_ratio,
+        image_count=parsed_image_count,
     )
 
 
@@ -204,22 +249,36 @@ def compose_tool_prompt(
     tool: ImageTool,
     user_prompt: str,
     product_fields: ProductImageFields | None = None,
+    generation_settings: ProductGenerationSettings | None = None,
 ) -> str:
     normalized_prompt = user_prompt.strip()
+    settings_lines = build_generation_settings_lines(generation_settings)
 
     if tool.id == "product" and product_fields is not None:
-        return compose_product_prompt(tool, normalized_prompt, product_fields)
+        return compose_product_prompt(
+            tool,
+            normalized_prompt,
+            product_fields,
+            generation_settings,
+        )
 
-    if not normalized_prompt:
+    if not normalized_prompt and not settings_lines:
         return tool.base_prompt
 
-    return f"{tool.base_prompt}\n\nUser request:\n{normalized_prompt}"
+    sections = [tool.base_prompt]
+    if settings_lines:
+        sections.append("Generation settings:\n" + "\n".join(settings_lines))
+    if normalized_prompt:
+        sections.append(f"User request:\n{normalized_prompt}")
+
+    return "\n\n".join(sections)
 
 
 def compose_product_prompt(
     tool: ImageTool,
     user_prompt: str,
     product_fields: ProductImageFields,
+    generation_settings: ProductGenerationSettings | None = None,
 ) -> str:
     platform_rule = get_product_platform_style(product_fields.platform_style)
     purpose_rule = get_product_image_purpose(product_fields.image_purpose)
@@ -245,6 +304,7 @@ def compose_product_prompt(
     ]
 
     brief_lines = build_product_brief_lines(product_fields, user_prompt)
+    brief_lines = build_generation_settings_lines(generation_settings) + brief_lines
     if brief_lines:
         sections.append("User product brief:\n" + "\n".join(brief_lines))
 
@@ -264,6 +324,20 @@ def build_product_brief_lines(
         ("Preserve requirements", product_fields.preserve_requirements),
         ("Avoid elements", product_fields.avoid_elements),
         ("Additional notes", user_prompt),
+    ]
+
+    return [f"- {label}: {value}" for label, value in field_lines if value]
+
+
+def build_generation_settings_lines(
+    generation_settings: ProductGenerationSettings | None,
+) -> list[str]:
+    if generation_settings is None:
+        return []
+
+    field_lines = [
+        ("Aspect ratio", generation_settings.aspect_ratio),
+        ("Image count", str(generation_settings.image_count)),
     ]
 
     return [f"- {label}: {value}" for label, value in field_lines if value]

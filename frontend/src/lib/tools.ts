@@ -1,4 +1,12 @@
-export const imageSizes = ["1024x1024", "1536x1024", "1024x1536"] as const;
+export const imageSizes = [
+  "1024x1024",
+  "1536x1024",
+  "1024x1536",
+  "2048x2048",
+  "2048x1152",
+  "3840x2160",
+  "2160x3840",
+] as const;
 
 export type ImageSize = (typeof imageSizes)[number];
 export type ToolId = "product";
@@ -24,20 +32,6 @@ export type ProductImagePurposeId =
   | "scene-image"
   | "promotion-image"
   | "detail-hero";
-
-export type ProductSceneStyleId =
-  | "studio"
-  | "home"
-  | "outdoor"
-  | "gift"
-  | "festival";
-
-export type ProductVisualToneId =
-  | "conversion"
-  | "premium"
-  | "lifestyle"
-  | "minimal"
-  | "vibrant";
 
 export type ProductOption<TId extends string = string> = {
   id: TId;
@@ -92,7 +86,7 @@ export const productImagePurposes: ProductOption<ProductImagePurposeId>[] = [
   {
     id: "promotion-image",
     label: "促销图",
-    description: "突出活动气氛和核心卖点，预留促销文案表达空间。",
+    description: "突出活动氛围和核心卖点，预留促销文案表达空间。",
   },
   {
     id: "detail-hero",
@@ -101,27 +95,11 @@ export const productImagePurposes: ProductOption<ProductImagePurposeId>[] = [
   },
 ];
 
-export const productSceneStyles: ProductOption<ProductSceneStyleId>[] = [
-  { id: "studio", label: "纯色棚拍", description: "干净、可控、突出主体。" },
-  { id: "home", label: "居家生活", description: "真实日常环境，适合种草。" },
-  { id: "outdoor", label: "户外使用", description: "强调便携、耐用和场景感。" },
-  { id: "gift", label: "礼盒陈列", description: "适合节日、送礼和套装表达。" },
-  { id: "festival", label: "节日活动", description: "更强活动氛围和购买冲动。" },
-];
-
-export const productVisualTones: ProductOption<ProductVisualToneId>[] = [
-  { id: "conversion", label: "高转化促销", description: "明亮、直接、利益点突出。" },
-  { id: "premium", label: "品质轻奢", description: "克制、高级、强调质感。" },
-  { id: "lifestyle", label: "真实种草", description: "自然光、生活化、可信赖。" },
-  { id: "minimal", label: "简约白净", description: "留白充分，适合干净主图。" },
-  { id: "vibrant", label: "鲜明活力", description: "色彩更强，适合短视频货架。" },
-];
-
 export const imageTools: ImageTool[] = [
   {
     id: "product",
     title: "电商商品图工作台",
-    description: "按平台、用途、卖点和场景生成更贴近真实运营需求的商品图。",
+    description: "用平台、比例、像素和对话迭代生成适合上架的商品图。",
     defaultSize: "1536x1024",
     sizeOptions: [...imageSizes],
   },

@@ -1,0 +1,8 @@
+INFO:     127.0.0.1:54003 - "OPTIONS /api/images/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54004 - "OPTIONS /api/images/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54005 - "POST /api/images/generate HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:60549 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60551 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57854 - "POST /api/images/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52476 - "POST /api/images/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60459 - "POST /api/images/generate HTTP/1.1" 200 OK

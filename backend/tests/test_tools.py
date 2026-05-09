@@ -14,12 +14,12 @@ def test_defines_only_product_tool():
     assert [tool.id for tool in image_tools] == ["product"]
 
 
-def test_product_tool_is_edit_capable():
-    assert get_tool_by_id("product").mode == "edit"
+def test_product_tool_can_generate_or_edit():
+    assert get_tool_by_id("product").mode == "generate"
 
 
-def test_product_tool_requires_upload():
-    assert get_tool_by_id("product").image_required is True
+def test_product_tool_allows_optional_upload():
+    assert get_tool_by_id("product").image_required is False
 
 
 def test_removed_tools_are_not_available():
@@ -30,8 +30,18 @@ def test_removed_tools_are_not_available():
 
 
 def test_accepts_only_configured_image_sizes():
-    assert image_sizes == ("1024x1024", "1536x1024", "1024x1536")
+    assert image_sizes == (
+        "1024x1024",
+        "1536x1024",
+        "1024x1536",
+        "2048x2048",
+        "2048x1152",
+        "3840x2160",
+        "2160x3840",
+    )
     assert is_image_size("1536x1024") is True
+    assert is_image_size("2048x2048") is True
+    assert is_image_size("3840x2160") is True
     assert is_image_size("800x800") is False
 
 

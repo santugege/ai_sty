@@ -3,8 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ImageSize = Literal["1024x1024", "1536x1024", "1024x1536"]
-ToolMode = Literal["edit"]
+ImageSize = Literal[
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "2048x2048",
+    "2048x1152",
+    "3840x2160",
+    "2160x3840",
+]
+ToolMode = Literal["generate"]
 ToolId = Literal["product"]
 ProductPlatformStyleId = Literal[
     "pinduoduo",
@@ -28,7 +36,15 @@ class ProductPromptRule:
     label: str
     prompt: str
 
-image_sizes: tuple[ImageSize, ...] = ("1024x1024", "1536x1024", "1024x1536")
+image_sizes: tuple[ImageSize, ...] = (
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "2048x2048",
+    "2048x1152",
+    "3840x2160",
+    "2160x3840",
+)
 
 product_platform_styles: tuple[ProductPromptRule, ...] = (
     ProductPromptRule(
@@ -142,17 +158,19 @@ image_tools: tuple[ImageTool, ...] = (
     ImageTool(
         id="product",
         title="商品图生成",
-        mode="edit",
+        mode="generate",
         prompt_label="商品场景",
         prompt_required=False,
-        image_required=True,
+        image_required=False,
         image_label="上传商品图",
         default_size="1536x1024",
         size_options=image_sizes,
         base_prompt=(
-            "Generate a clean ecommerce product visual from the uploaded product "
-            "image. Preserve the product shape, color, logo, and important "
-            "details while changing the scene as requested."
+            "Generate a clean ecommerce product visual. If a product image is "
+            "provided, preserve the product shape, color, logo, and important "
+            "details while changing the scene as requested. If no product image "
+            "is provided, create a commercially usable ecommerce direction draft "
+            "from the platform, purpose, aspect ratio, size, and user brief."
         ),
     ),
 )

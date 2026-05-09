@@ -27,9 +27,10 @@ test("agent route renders the workbench", () => {
   assert.match(source, /AgentImageWorkbench/);
 });
 
-test("homepage links to the readable agent workbench entry", () => {
-  const source = readFileSync("src/components/home-product-workbench.tsx", "utf8");
+test("product workbench keeps the conversational adjustment entry", () => {
+  const source = readFileSync("src/components/product-workbench.tsx", "utf8");
 
-  assert.match(source, /href: "\/agent"/);
-  assert.match(source, /多轮 Agent/);
+  assert.match(source, /agentConversationPanel/);
+  assert.match(source, /Agent 对话调整/);
+  assert.match(source, /chatMessages\.map/);
 });

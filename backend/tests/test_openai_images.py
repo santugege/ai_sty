@@ -2,8 +2,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.image_request import ProductImageFields, ValidImageRequest
-from app.openai_images import normalize_openai_image_response, request_image_from_openai
+from app.image_request import (
+    ProductGenerationSettings,
+    ProductImageFields,
+    ValidImageRequest,
+)
+from app.openai_images import (
+    normalize_openai_image_response,
+    request_image_from_openai,
+)
 from app.tools import get_tool_by_id
 
 
@@ -32,7 +39,7 @@ def test_raises_stable_error_when_no_image_is_returned():
         normalize_openai_image_response({"data": []})
 
 
-def test_rejects_openai_request_without_uploaded_product_image():
+def test_requests_product_image_generation_without_uploaded_image():
     class FakeImages:
         def __init__(self):
             self.generate_kwargs = None
@@ -52,20 +59,59 @@ def test_rejects_openai_request_without_uploaded_product_image():
 
     fake_client = FakeClient()
 
-    with pytest.raises(RuntimeError, match="商品图生成需要上传商品图。"):
-        request_image_from_openai(
-            ValidImageRequest(
-                tool=get_tool_by_id("product"),
-                prompt="商品场景",
-                size="1536x1024",
+    result = request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("product"),
+            prompt="商品场景",
+            size="2048x2048",
+            generation_settings=ProductGenerationSettings(
+                aspect_ratio="1:1",
+                image_count=1,
             ),
-            api_key="key",
-            model="gpt-image-2",
-            client_factory=lambda api_key: fake_client,
-        )
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
 
-    assert fake_client.images.generate_kwargs is None
+    assert result.images[0].src == "data:image/png;base64,abc123"
+    assert fake_client.images.generate_kwargs["model"] == "gpt-image-2"
+    assert fake_client.images.generate_kwargs["size"] == "2048x2048"
+    assert fake_client.images.generate_kwargs["quality"] == "auto"
+    assert "商品场景" in fake_client.images.generate_kwargs["prompt"]
     assert fake_client.images.edit_kwargs is None
+
+
+def test_request_image_from_openai_passes_base_url_to_client_factory():
+    class FakeImages:
+        def generate(self, **kwargs):
+            return {"data": [{"b64_json": "abc123"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    calls = []
+
+    def fake_client_factory(**kwargs):
+        calls.append(kwargs)
+        return FakeClient()
+
+    request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("product"),
+            prompt="product scene",
+            size="1024x1024",
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        base_url="https://api.example.test/v1",
+        client_factory=fake_client_factory,
+    )
+
+    assert calls == [
+        {"api_key": "key", "base_url": "https://api.example.test/v1"}
+    ]
 
 
 def test_requests_product_image_edit_when_uploaded_image_is_present():
@@ -102,7 +148,7 @@ def test_requests_product_image_edit_when_uploaded_image_is_present():
         client_factory=lambda api_key: fake_client,
     )
 
-    assert result.src == "data:image/png;base64,edited"
+    assert result.images[0].src == "data:image/png;base64,edited"
     assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
     assert fake_client.images.edit_kwargs["image"].name == "product.png"
     assert "保留瓶身居中" in fake_client.images.edit_kwargs["prompt"]
@@ -145,6 +191,51 @@ def test_requests_image_edit_with_structured_product_prompt():
         client_factory=lambda api_key: fake_client,
     )
 
-    assert result.src == "data:image/png;base64,product"
+    assert result.images[0].src == "data:image/png;base64,product"
     assert "Platform style (拼多多):" in fake_client.images.edit_kwargs["prompt"]
     assert "Product category: 小家电" in fake_client.images.edit_kwargs["prompt"]
+
+
+def test_requests_multiple_images_by_repeating_single_image_generation():
+    class FakeImages:
+        def __init__(self):
+            self.generate_kwargs = []
+            self.edit_kwargs = None
+
+        def generate(self, **kwargs):
+            self.generate_kwargs.append(kwargs)
+            return {"data": [{"b64_json": f"image-{len(self.generate_kwargs)}"}]}
+
+        def edit(self, **kwargs):
+            self.edit_kwargs = kwargs
+            return {"data": [{"b64_json": "should-not-happen"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+
+    result = request_image_from_openai(
+        ValidImageRequest(
+            tool=get_tool_by_id("product"),
+            prompt="生成四张主图方向",
+            size="1024x1024",
+            generation_settings=ProductGenerationSettings(
+                aspect_ratio="1:1",
+                image_count=4,
+            ),
+        ),
+        api_key="key",
+        model="gpt-image-2",
+        client_factory=lambda api_key: fake_client,
+    )
+
+    assert [image.src for image in result.images] == [
+        "data:image/png;base64,image-1",
+        "data:image/png;base64,image-2",
+        "data:image/png;base64,image-3",
+        "data:image/png;base64,image-4",
+    ]
+    assert len(fake_client.images.generate_kwargs) == 4
+    assert fake_client.images.edit_kwargs is None

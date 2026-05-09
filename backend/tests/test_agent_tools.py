@@ -72,6 +72,43 @@ def test_gpt_image_2_edit_tool_uses_openai_image_model_env(monkeypatch):
     assert result.model == "custom-image-model"
 
 
+def test_create_openai_image_client_passes_base_url_to_client_factory():
+    calls = []
+
+    class FakeImages:
+        def edit(self, **kwargs):
+            return {"data": [{"b64_json": "ZWRpdGVk"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    def fake_client_factory(**kwargs):
+        calls.append(kwargs)
+        return FakeClient()
+
+    image_client = create_openai_image_client(
+        api_key="key",
+        image_model="gpt-image-2",
+        base_url="https://api.example.test/v1",
+        client_factory=fake_client_factory,
+    )
+
+    image_client(
+        AgentToolContext(
+            image_bytes=b"original",
+            image_name="product.png",
+            mime_type="image/png",
+            instruction="Make it brighter",
+            size="1024x1024",
+        )
+    )
+
+    assert calls == [
+        {"api_key": "key", "base_url": "https://api.example.test/v1"}
+    ]
+
+
 def test_agent_envelope_accepts_camel_case_fields_and_dumps_json_safe_values():
     session_id = uuid4()
     image_version_id = uuid4()

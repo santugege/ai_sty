@@ -16,17 +16,24 @@ const nextConfigSource = readFileSync(new URL("../next.config.ts", import.meta.u
 const toolCardPath = new URL("../src/components/tool-card.tsx", import.meta.url);
 const toolFormPath = new URL("../src/components/tool-form.tsx", import.meta.url);
 
-test("global theme uses a dark creative-studio color system", () => {
-  assert.match(globalsSource, /--color-paper:\s*#0b0d12/);
-  assert.match(globalsSource, /--color-surface:/);
-  assert.match(globalsSource, /--color-cyan:/);
-  assert.match(globalsSource, /--color-coral:/);
-  assert.match(globalsSource, /radial-gradient/);
+test("global theme uses the light ecommerce command-center color system", () => {
+  assert.match(globalsSource, /--color-paper:\s*#f4f5f0/i);
+  assert.match(globalsSource, /--color-surface:\s*#ffffff/i);
+  assert.match(globalsSource, /--color-cyan:\s*#0f8d7b/i);
+  assert.match(globalsSource, /--color-coral:\s*#e9563e/i);
+  assert.match(globalsSource, /--color-border:\s*#d8ddd2/i);
+  assert.match(globalsSource, /color-scheme:\s*light/);
+  assert.match(globalsSource, /command-card/);
+  assert.match(globalsSource, /command-grid/);
+  assert.doesNotMatch(globalsSource, /color-scheme:\s*dark/);
 });
 
-test("frontend registry exposes only the product image tool", () => {
+test("frontend registry exposes only the product image tool with readable labels", () => {
   assert.match(toolsSource, /export type ToolId = "product"/);
   assert.match(toolsSource, /id: "product"/);
+  assert.match(toolsSource, /电商商品图工作台/);
+  assert.match(toolsSource, /淘宝\/天猫/);
+  assert.match(toolsSource, /主图/);
   assert.doesNotMatch(toolsSource, /id: "creator"/);
   assert.doesNotMatch(toolsSource, /id: "restore"/);
   assert.doesNotMatch(toolsSource, /id: "avatar"/);
@@ -50,15 +57,46 @@ test("generic non-product frontend components are removed", () => {
   assert.equal(existsSync(toolFormPath), false);
 });
 
-test("product workbench shows a non-empty canvas and persistent generation controls", () => {
+test("product detail workbench still shows a non-empty canvas and persistent generation controls", () => {
   assert.match(productWorkbenchSource, /sampleShowcase/);
   assert.match(productWorkbenchSource, /conceptStudioShell/);
   assert.match(productWorkbenchSource, /leftControlPanel/);
   assert.match(productWorkbenchSource, /centerStage/);
   assert.match(productWorkbenchSource, /rightInspector/);
-  assert.match(productWorkbenchSource, /生成商品图/);
+  assert.match(productWorkbenchSource, /生成商品图|鐢熸垚鍟嗗搧鍥?/);
   assert.match(productWorkbenchSource, /xl:grid-cols-\[/);
-  assert.doesNotMatch(productWorkbenchSource, /bg-white/);
+});
+
+test("product detail workbench supports the simplified conversational generation workflow", () => {
+  assert.match(toolsSource, /2048x2048/);
+  assert.match(toolsSource, /2048x1152/);
+  assert.match(toolsSource, /3840x2160/);
+  assert.match(toolsSource, /2160x3840/);
+
+  assert.match(productWorkbenchSource, /optionalSourcePanel/);
+  assert.match(productWorkbenchSource, /generationSettingsPanel/);
+  assert.match(productWorkbenchSource, /agentConversationPanel/);
+  assert.match(productWorkbenchSource, /可选上传原图/);
+  assert.match(productWorkbenchSource, /电商平台/);
+  assert.match(productWorkbenchSource, /画面比例/);
+  assert.match(productWorkbenchSource, /生成像素/);
+  assert.match(productWorkbenchSource, /生成数量/);
+  assert.match(productWorkbenchSource, /Agent 对话调整/);
+  assert.match(productWorkbenchSource, /chatMessages\.map/);
+  assert.match(productWorkbenchSource, /chatInput/);
+  assert.match(productWorkbenchSource, /formData\.append\("aspectRatio", aspectRatio\)/);
+  assert.match(productWorkbenchSource, /formData\.append\("imageCount", imageCount\)/);
+  assert.doesNotMatch(productWorkbenchSource, /required/);
+  assert.doesNotMatch(productWorkbenchSource, /productSceneStyles/);
+  assert.doesNotMatch(productWorkbenchSource, /productVisualTones/);
+  assert.doesNotMatch(productWorkbenchSource, /productCategory/);
+  assert.doesNotMatch(productWorkbenchSource, /sellingPoints/);
+  assert.doesNotMatch(productWorkbenchSource, /promotionText/);
+  assert.doesNotMatch(productWorkbenchSource, /preserveRequirements/);
+  assert.doesNotMatch(productWorkbenchSource, /avoidElements/);
+  assert.doesNotMatch(productWorkbenchSource, /Additional Directives/);
+  assert.doesNotMatch(productWorkbenchSource, /Key Selling Points/);
+  assert.doesNotMatch(productWorkbenchSource, /Product Category/);
 });
 
 test("development preview hides the Next.js indicator for screenshot parity", () => {

@@ -8,6 +8,7 @@ from starlette.datastructures import Headers
 from app.image_request import (
     MAX_IMAGE_BYTES,
     SUPPORTED_IMAGE_TYPES,
+    ProductGenerationSettings,
     ImageRequestError,
     ProductImageFields,
     compose_tool_prompt,
@@ -88,14 +89,28 @@ def test_rejects_removed_tool_ids():
             raise AssertionError("Expected ImageRequestError")
 
 
-def test_requires_upload_for_product_image_generation():
-    try:
-        run(validate_image_form("product", "商品场景", "1024x1024", None, "key"))
-    except ImageRequestError as error:
-        assert error.status_code == 400
-        assert error.message == "请上传商品图。"
-    else:
-        raise AssertionError("Expected ImageRequestError")
+def test_allows_product_image_generation_without_upload():
+    result = run(
+        validate_image_form(
+            "product",
+            "平台：拼多多\n画面比例：1:1",
+            "2048x2048",
+            None,
+            "key",
+            platform_style="pinduoduo",
+            image_purpose="main-image",
+            aspect_ratio="1:1",
+            image_count="4",
+        )
+    )
+
+    assert result.tool.id == "product"
+    assert result.image_bytes is None
+    assert result.size == "2048x2048"
+    assert result.generation_settings == ProductGenerationSettings(
+        aspect_ratio="1:1",
+        image_count=4,
+    )
 
 
 def test_rejects_unsupported_file_types():
@@ -219,6 +234,10 @@ def test_returns_normalized_valid_request():
     assert result.image_bytes == TINY_PNG
     assert result.image_name == "product.png"
     assert result.image_type == "image/png"
+    assert result.generation_settings == ProductGenerationSettings(
+        aspect_ratio="",
+        image_count=1,
+    )
 
 
 def test_falls_back_to_default_size_for_invalid_size_input():
@@ -233,6 +252,64 @@ def test_falls_back_to_default_size_for_invalid_size_input():
     )
 
     assert result.size == "1536x1024"
+
+
+def test_accepts_gpt_image_2_popular_sizes():
+    result = run(
+        validate_image_form(
+            "product",
+            "横版直播封面",
+            "3840x2160",
+            None,
+            "key",
+            platform_style="douyin",
+            image_purpose="promotion-image",
+        )
+    )
+
+    assert result.size == "3840x2160"
+
+
+def test_rejects_unsupported_aspect_ratio():
+    try:
+        run(
+            validate_image_form(
+                "product",
+                "",
+                "1536x1024",
+                None,
+                "key",
+                platform_style="pinduoduo",
+                image_purpose="main-image",
+                aspect_ratio="4:5",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请选择有效的画面比例。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
+
+
+def test_rejects_unsupported_image_count():
+    try:
+        run(
+            validate_image_form(
+                "product",
+                "",
+                "1536x1024",
+                None,
+                "key",
+                platform_style="pinduoduo",
+                image_purpose="main-image",
+                image_count="3",
+            )
+        )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "生成数量仅支持 1、2 或 4 张。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
 
 
 def test_compose_tool_prompt_combines_base_prompt_with_user_instructions():
@@ -271,6 +348,8 @@ def test_product_request_normalizes_structured_fields():
             promotion_text="限时立减 20 元",
             preserve_requirements="保留品牌 logo",
             avoid_elements="不要额外配件",
+            aspect_ratio="2:3",
+            image_count="2",
         )
     )
 
@@ -286,6 +365,10 @@ def test_product_request_normalizes_structured_fields():
         promotion_text="限时立减 20 元",
         preserve_requirements="保留品牌 logo",
         avoid_elements="不要额外配件",
+    )
+    assert result.generation_settings == ProductGenerationSettings(
+        aspect_ratio="2:3",
+        image_count=2,
     )
 
 

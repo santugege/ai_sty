@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from openai import OpenAI
 
+from app.config import openai_client_kwargs
+
 
 @dataclass(frozen=True)
 class AgentTurnDecision:
@@ -23,9 +25,10 @@ def request_agent_decision(
     current_image_summary: str,
     recent_messages: list[dict[str, str]],
     previous_response_id: str | None,
+    base_url: str | None = None,
     client_factory: type[Any] = OpenAI,
 ) -> AgentTurnDecision:
-    client = client_factory(api_key=api_key)
+    client = client_factory(**openai_client_kwargs(api_key, base_url))
     response = client.responses.create(
         model=agent_model,
         previous_response_id=previous_response_id,
