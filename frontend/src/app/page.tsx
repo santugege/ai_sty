@@ -11,7 +11,7 @@ import { getToolById } from "@/lib/tools";
 
 const navItems = [
   { label: "商品图", href: "/", icon: Package, active: true },
-  { label: "多轮编辑", href: "/agent", icon: MessageSquareText },
+  { label: "ChatGPT 对话", href: "/agent", icon: MessageSquareText },
   { label: "素材库", href: "/", icon: Layers3 },
   { label: "设置", href: "/", icon: Settings2 },
 ];

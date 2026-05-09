@@ -3,24 +3,23 @@ from __future__ import annotations
 import logging
 import os
 from urllib.parse import urlsplit, urlunsplit
-from uuid import UUID
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.agent_openai import request_agent_decision
-from app.agent_repository import AgentRepository
-from app.agent_service import AgentInputError, AgentServiceError, ImageAgentService
+from app.agent_openai import request_conversation_turn
+from app.agent_service import (
+    AgentInputError,
+    AgentServiceError,
+    ChatGptConversationService,
+)
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
 from app.config import load_backend_env, openai_base_url
 
 load_backend_env()
 
-from app.db import SessionLocal
-from app.image_storage import LocalImageStorage
 from app.image_request import (
     MAX_IMAGE_BYTES,
     SUPPORTED_IMAGE_TYPES,
@@ -31,6 +30,7 @@ from app.image_request import (
 from app.openai_images import request_image_from_openai
 
 logger = logging.getLogger(__name__)
+conversation_service: ChatGptConversationService | None = None
 
 
 def frontend_origins() -> list[str]:
@@ -73,7 +73,11 @@ app.add_middleware(
 )
 
 
-def build_agent_service(db: Session) -> ImageAgentService:
+def build_conversation_service() -> ChatGptConversationService:
+    global conversation_service
+    if conversation_service is not None:
+        return conversation_service
+
     api_key = os.getenv("OPENAI_API_KEY") or ""
     image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
     agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.5")
@@ -85,19 +89,18 @@ def build_agent_service(db: Session) -> ImageAgentService:
     )
 
     def planner(**kwargs):
-        return request_agent_decision(
+        return request_conversation_turn(
             api_key=api_key,
             agent_model=agent_model,
             base_url=base_url,
             **kwargs,
         )
 
-    return ImageAgentService(
-        AgentRepository(db),
-        LocalImageStorage(),
+    conversation_service = ChatGptConversationService(
         planner,
         {"gpt_image_2_edit": GptImage2EditTool(image_client=image_client, image_model=image_model)},
     )
+    return conversation_service
 
 
 def agent_error_response(error: Exception) -> JSONResponse:
@@ -115,26 +118,41 @@ def agent_error_response(error: Exception) -> JSONResponse:
 
 
 def run_agent_service(method_name: str, *args, **kwargs):
-    with SessionLocal() as db:
-        service = build_agent_service(db)
-        method = getattr(service, method_name)
-        return method(*args, **kwargs)
+    service = build_conversation_service()
+    method = getattr(service, method_name)
+    return method(*args, **kwargs)
 
 
 async def read_agent_upload(image: UploadFile) -> tuple[bytes, str, str]:
     image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
     if not image_bytes:
-        raise AgentInputError("Please upload the initial product image.")
+        raise AgentInputError("上传的图片为空。")
 
     mime_type = image.content_type or ""
     if mime_type not in SUPPORTED_IMAGE_TYPES:
-        raise ImageRequestError(400, "鍥剧墖鏍煎紡浠呮敮鎸?PNG銆丣PG 鎴?WebP銆?")
+        raise ImageRequestError(400, "图片格式仅支持 PNG、JPG 或 WebP。")
 
     if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise ImageRequestError(400, "鍥剧墖涓嶈兘瓒呰繃 10MB銆?")
+        raise ImageRequestError(400, "图片不能超过 10MB。")
 
     validate_uploaded_image_content(image_bytes, mime_type)
     return image_bytes, image.filename or "product.png", mime_type
+
+
+async def read_conversation_uploads(
+    images: list[UploadFile] | None,
+) -> list[dict[str, object]]:
+    attachments = []
+    for image in images or []:
+        image_bytes, image_name, mime_type = await read_agent_upload(image)
+        attachments.append(
+            {
+                "image_bytes": image_bytes,
+                "image_name": image_name,
+                "mime_type": mime_type,
+            }
+        )
+    return attachments
 
 
 @app.get("/health")
@@ -142,23 +160,19 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.post("/api/agent/sessions")
-async def create_agent_session(
-    instruction: str = Form(""),
+@app.post("/api/agent/conversation")
+async def send_conversation_message(
+    message: str = Form(""),
     size: str = Form("1536x1024"),
-    image: UploadFile | None = File(None),
+    images: list[UploadFile] | None = File(None),
 ):
     try:
-        if image is None:
-            raise AgentInputError("Please upload the initial product image.")
-        image_bytes, image_name, mime_type = await read_agent_upload(image)
+        attachments = await read_conversation_uploads(images)
         envelope = await run_in_threadpool(
             run_agent_service,
-            "create_session",
-            instruction=instruction,
-            image_bytes=image_bytes,
-            image_name=image_name,
-            mime_type=mime_type,
+            "send_message",
+            message=message,
+            attachments=attachments,
             size=size,
         )
         return envelope.model_dump(mode="json")
@@ -166,39 +180,14 @@ async def create_agent_session(
         return agent_error_response(error)
 
 
-@app.post("/api/agent/sessions/{session_id}/messages")
-async def send_agent_message(
-    session_id: UUID,
-    payload: dict[str, str],
-):
+@app.post("/api/agent/conversation/reset")
+async def reset_conversation():
     try:
         envelope = await run_in_threadpool(
             run_agent_service,
-            "send_message",
-            session_id,
-            payload.get("instruction", ""),
-            payload.get("size", "1536x1024"),
+            "reset",
         )
         return envelope.model_dump(mode="json")
-    except (AgentInputError, AgentServiceError, Exception) as error:
-        return agent_error_response(error)
-
-
-@app.get("/api/agent/sessions/{session_id}")
-def get_agent_session(session_id: UUID):
-    try:
-        return run_agent_service("get_session", session_id).model_dump(mode="json")
-    except (AgentInputError, AgentServiceError, Exception) as error:
-        return agent_error_response(error)
-
-
-@app.post("/api/agent/sessions/{session_id}/versions/{version_id}/restore")
-def restore_agent_version(
-    session_id: UUID,
-    version_id: UUID,
-):
-    try:
-        return run_agent_service("restore_version", session_id, version_id).model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
 

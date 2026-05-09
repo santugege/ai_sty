@@ -2,50 +2,50 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
 
 from pydantic import BaseModel
 
 
-class AgentSessionDto(BaseModel):
-    id: UUID
+class ConversationDto(BaseModel):
+    id: str
     title: str
-    currentVersionId: UUID | None
     previousResponseId: str | None
     status: str
     createdAt: datetime
     updatedAt: datetime
 
 
-class AgentMessageDto(BaseModel):
-    id: UUID
-    sessionId: UUID
-    role: Literal["user", "assistant", "tool"]
-    content: str
-    responseId: str | None
-    toolCallId: str | None
+class ConversationAttachmentDto(BaseModel):
+    id: str
+    name: str
+    mimeType: str
+    src: str
     createdAt: datetime
 
 
-class ImageVersionDto(BaseModel):
-    id: UUID
-    sessionId: UUID
-    parentVersionId: UUID | None
+class ConversationImageDto(BaseModel):
+    id: str
     src: str
-    storageKey: str
     mimeType: str
-    width: int | None
-    height: int | None
     prompt: str
     revisedPrompt: str | None
     model: str
     createdAt: datetime
 
 
+class ConversationMessageDto(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    attachments: list[ConversationAttachmentDto] = []
+    responseId: str | None = None
+    image: ConversationImageDto | None = None
+    createdAt: datetime
+
+
 class AgentEnvelope(BaseModel):
-    session: AgentSessionDto
-    messages: list[AgentMessageDto]
-    currentImage: ImageVersionDto | None
-    versions: list[ImageVersionDto]
-    pendingQuestion: str | None = None
+    conversation: ConversationDto
+    messages: list[ConversationMessageDto]
+    currentImage: ConversationImageDto | None
     error: str | None = None
+

@@ -110,17 +110,16 @@ def test_create_openai_image_client_passes_base_url_to_client_factory():
 
 
 def test_agent_envelope_accepts_camel_case_fields_and_dumps_json_safe_values():
-    session_id = uuid4()
-    image_version_id = uuid4()
+    image_id = "img_123"
+    attachment_id = "att_123"
     message_id = uuid4()
     created_at = datetime(2026, 5, 8, 10, 30, tzinfo=timezone.utc)
     updated_at = datetime(2026, 5, 8, 10, 31, tzinfo=timezone.utc)
 
     envelope = AgentEnvelope(
-        session={
-            "id": session_id,
-            "title": "Product edit",
-            "currentVersionId": image_version_id,
+        conversation={
+            "id": "default",
+            "title": "ChatGPT 对话",
             "previousResponseId": "resp_previous",
             "status": "ready",
             "createdAt": created_at,
@@ -128,38 +127,38 @@ def test_agent_envelope_accepts_camel_case_fields_and_dumps_json_safe_values():
         },
         messages=[
             {
-                "id": message_id,
-                "sessionId": session_id,
+                "id": str(message_id),
                 "role": "user",
                 "content": "Make it brighter",
-                "responseId": None,
-                "toolCallId": None,
+                "attachments": [
+                    {
+                        "id": attachment_id,
+                        "name": "product.png",
+                        "mimeType": "image/png",
+                        "src": "data:image/png;base64,abc",
+                        "createdAt": created_at,
+                    }
+                ],
                 "createdAt": created_at,
             }
         ],
         currentImage={
-            "id": image_version_id,
-            "sessionId": session_id,
-            "parentVersionId": None,
+            "id": image_id,
             "src": "data:image/png;base64,abc",
-            "storageKey": "sessions/image.png",
             "mimeType": "image/png",
-            "width": 1024,
-            "height": 1024,
             "prompt": "Make it brighter",
             "revisedPrompt": None,
             "model": "gpt-image-2",
             "createdAt": created_at,
         },
-        versions=[],
     )
 
     dumped = envelope.model_dump(mode="json")
 
-    assert dumped["session"]["id"] == str(session_id)
-    assert dumped["session"]["currentVersionId"] == str(image_version_id)
-    assert dumped["session"]["createdAt"] == "2026-05-08T10:30:00Z"
+    assert dumped["conversation"]["id"] == "default"
+    assert dumped["conversation"]["createdAt"] == "2026-05-08T10:30:00Z"
     assert dumped["messages"][0]["id"] == str(message_id)
+    assert dumped["messages"][0]["attachments"][0]["id"] == attachment_id
     assert dumped["currentImage"]["createdAt"] == "2026-05-08T10:30:00Z"
 
 

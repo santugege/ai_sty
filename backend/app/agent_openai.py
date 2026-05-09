@@ -10,24 +10,28 @@ from app.config import openai_client_kwargs
 
 
 @dataclass(frozen=True)
-class AgentTurnDecision:
-    action: Literal["edit", "clarify"]
+class ConversationTurnDecision:
+    action: Literal["answer", "edit"]
     assistant_message: str
     tool_name: str | None
     tool_instruction: str | None
     response_id: str | None
 
 
-def request_agent_decision(
+AgentTurnDecision = ConversationTurnDecision
+
+
+def request_conversation_turn(
     api_key: str,
     agent_model: str,
     user_message: str,
-    current_image_summary: str,
     recent_messages: list[dict[str, str]],
+    has_current_image: bool,
+    uploaded_image_count: int,
     previous_response_id: str | None,
     base_url: str | None = None,
     client_factory: type[Any] = OpenAI,
-) -> AgentTurnDecision:
+) -> ConversationTurnDecision:
     client = client_factory(**openai_client_kwargs(api_key, base_url))
     response = client.responses.create(
         model=agent_model,
@@ -36,12 +40,14 @@ def request_agent_decision(
             {
                 "role": "system",
                 "content": (
-                    "You are an ecommerce image editing agent. Decide whether "
-                    "the user's request is clear enough to edit the current "
-                    "product image or whether you need a clarification. Return "
-                    "JSON only with action, assistant_message, tool_name, and "
-                    "tool_instruction. Use tool_name gpt_image_2_edit only "
-                    "when action is edit."
+                    "You are a ChatGPT-style ecommerce image assistant. Keep one "
+                    "continuous conversation in mind. Users may upload images in "
+                    "any turn and ask for edits or normal answers. Return JSON "
+                    "only with action, assistant_message, tool_name, and "
+                    "tool_instruction. Use action edit and tool_name "
+                    "gpt_image_2_edit when the user wants an image changed or "
+                    "generated from the current image context. Use action answer "
+                    "for clarifying questions, confirmations, or text-only help."
                 ),
             },
             {
@@ -49,14 +55,42 @@ def request_agent_decision(
                 "content": json.dumps(
                     {
                         "user_message": user_message,
-                        "current_image_summary": current_image_summary,
                         "recent_messages": recent_messages,
-                    }
+                        "has_current_image": has_current_image,
+                        "uploaded_image_count": uploaded_image_count,
+                    },
+                    ensure_ascii=False,
                 ),
             },
         ],
     )
+    return parse_conversation_turn_response(response)
 
+
+def request_agent_decision(
+    api_key: str,
+    agent_model: str,
+    user_message: str,
+    current_image_summary: str = "",
+    recent_messages: list[dict[str, str]] | None = None,
+    previous_response_id: str | None = None,
+    base_url: str | None = None,
+    client_factory: type[Any] = OpenAI,
+) -> ConversationTurnDecision:
+    return request_conversation_turn(
+        api_key=api_key,
+        agent_model=agent_model,
+        user_message=user_message,
+        recent_messages=recent_messages or [],
+        has_current_image=bool(current_image_summary),
+        uploaded_image_count=0,
+        previous_response_id=previous_response_id,
+        base_url=base_url,
+        client_factory=client_factory,
+    )
+
+
+def parse_conversation_turn_response(response: Any) -> ConversationTurnDecision:
     try:
         payload = json.loads(response.output_text)
     except (TypeError, json.JSONDecodeError) as error:
@@ -66,29 +100,28 @@ def request_agent_decision(
         raise RuntimeError("Agent decision response was not valid JSON.")
 
     action = payload.get("action")
-    if action not in {"edit", "clarify"}:
+    if action not in {"answer", "edit", "clarify"}:
         raise RuntimeError("Agent decision action was invalid.")
 
+    normalized_action = "answer" if action == "clarify" else action
     assistant_message = payload.get("assistant_message")
     tool_name = payload.get("tool_name")
     tool_instruction = payload.get("tool_instruction")
-    if not isinstance(assistant_message, str):
-        raise RuntimeError("Agent decision response was not valid JSON.")
-    if not assistant_message.strip():
+    if not isinstance(assistant_message, str) or not assistant_message.strip():
         raise RuntimeError("Agent decision response was not valid JSON.")
     if tool_name is not None and not isinstance(tool_name, str):
         raise RuntimeError("Agent decision response was not valid JSON.")
     if tool_instruction is not None and not isinstance(tool_instruction, str):
         raise RuntimeError("Agent decision response was not valid JSON.")
-    if action == "edit" and (
+    if normalized_action == "edit" and (
         tool_name != "gpt_image_2_edit"
         or tool_instruction is None
         or not tool_instruction.strip()
     ):
         raise RuntimeError("Agent edit decision was invalid.")
 
-    return AgentTurnDecision(
-        action=action,
+    return ConversationTurnDecision(
+        action=normalized_action,
         assistant_message=assistant_message,
         tool_name=tool_name,
         tool_instruction=tool_instruction,

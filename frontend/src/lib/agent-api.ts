@@ -2,79 +2,62 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:8000";
 
-export type AgentMessage = {
+export type ConversationAttachment = {
   id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "tool";
-  content: string;
-  responseId?: string | null;
-  toolCallId?: string | null;
+  name: string;
+  mimeType: string;
+  src: string;
   createdAt: string;
 };
 
-export type AgentImageVersion = {
+export type ConversationImage = {
   id: string;
-  sessionId: string;
-  parentVersionId?: string | null;
   src: string;
-  storageKey: string;
   mimeType: string;
-  width?: number | null;
-  height?: number | null;
   prompt: string;
   revisedPrompt?: string | null;
   model: string;
   createdAt: string;
 };
 
+export type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  attachments: ConversationAttachment[];
+  responseId?: string | null;
+  image?: ConversationImage | null;
+  createdAt: string;
+};
+
 export type AgentEnvelope = {
-  session: {
+  conversation: {
     id: string;
     title: string;
-    currentVersionId?: string | null;
     previousResponseId?: string | null;
     status: string;
     createdAt: string;
     updatedAt: string;
   };
-  messages: AgentMessage[];
-  currentImage?: AgentImageVersion | null;
-  versions: AgentImageVersion[];
-  pendingQuestion?: string | null;
+  messages: ConversationMessage[];
+  currentImage?: ConversationImage | null;
   error?: string | null;
 };
 
-export async function createAgentSession(formData: FormData) {
+export async function sendConversationMessage(formData: FormData) {
   return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/sessions`, {
+    await fetch(`${apiBaseUrl}/api/agent/conversation`, {
       method: "POST",
       body: formData,
     }),
   );
 }
 
-export async function sendAgentMessage(
-  sessionId: string,
-  instruction: string,
-  size: string,
-) {
+export async function resetConversation() {
   return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/sessions/${sessionId}/messages`, {
+    await fetch(`${apiBaseUrl}/api/agent/conversation/reset`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ instruction, size }),
     }),
-  );
-}
-
-export async function restoreAgentVersion(sessionId: string, versionId: string) {
-  return readAgentResponse(
-    await fetch(
-      `${apiBaseUrl}/api/agent/sessions/${sessionId}/versions/${versionId}/restore`,
-      {
-        method: "POST",
-      },
-    ),
   );
 }
 

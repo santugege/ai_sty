@@ -3,235 +3,272 @@ from __future__ import annotations
 import base64
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
-from app.agent_openai import AgentTurnDecision
-from app.agent_repository import AgentRepository, AgentSessionState
+from app.agent_openai import ConversationTurnDecision
 from app.agent_schemas import (
     AgentEnvelope,
-    AgentMessageDto,
-    AgentSessionDto,
-    ImageVersionDto,
+    ConversationAttachmentDto,
+    ConversationDto,
+    ConversationImageDto,
+    ConversationMessageDto,
 )
 from app.agent_tools import AgentTool, AgentToolContext, AgentToolResult
-from app.image_storage import LocalImageStorage
 
 
-Planner = Callable[..., AgentTurnDecision]
+Planner = Callable[..., ConversationTurnDecision]
 
 
 class AgentServiceError(Exception):
     status_code = 500
 
 
-class AgentInputError(AgentServiceError):
+class ConversationInputError(AgentServiceError):
     status_code = 400
 
 
-class ImageAgentService:
+AgentInputError = ConversationInputError
+
+
+@dataclass
+class StoredAttachment:
+    id: str
+    name: str
+    mime_type: str
+    image_bytes: bytes
+    created_at: datetime
+
+
+@dataclass
+class StoredImage:
+    id: str
+    image_bytes: bytes
+    mime_type: str
+    prompt: str
+    revised_prompt: str | None
+    model: str
+    created_at: datetime
+
+
+@dataclass
+class StoredMessage:
+    id: str
+    role: str
+    content: str
+    attachments: list[StoredAttachment] = field(default_factory=list)
+    response_id: str | None = None
+    image: StoredImage | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class ConversationState:
+    id: str = "default"
+    title: str = "ChatGPT 对话"
+    previous_response_id: str | None = None
+    status: str = "ready"
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    messages: list[StoredMessage] = field(default_factory=list)
+    current_image: StoredImage | None = None
+
+
+class ChatGptConversationService:
     def __init__(
         self,
-        repo: AgentRepository,
-        storage: LocalImageStorage,
         planner: Planner,
         tools: dict[str, AgentTool],
+        state: ConversationState | None = None,
     ) -> None:
-        self.repo = repo
-        self.storage = storage
         self.planner = planner
         self.tools = tools
-
-    def create_session(
-        self,
-        instruction: str,
-        image_bytes: bytes,
-        image_name: str,
-        mime_type: str,
-        size: str,
-    ) -> AgentEnvelope:
-        if not instruction.strip():
-            raise AgentInputError("Please enter an edit instruction.")
-        if not image_bytes:
-            raise AgentInputError("Please upload the initial product image.")
-
-        session = self.repo.create_session(title=instruction[:80] or "Image session")
-        stored = self.storage.write_image(image_bytes, mime_type=mime_type)
-        try:
-            initial = self.repo.add_image_version(
-                session.id,
-                None,
-                stored.storage_key,
-                stored.mime_type,
-                "Initial upload",
-                "user-upload",
-            )
-            self.repo.set_current_version(session.id, initial.id)
-            self.repo.add_message(session.id, "user", instruction)
-            return self._run_turn(session.id, instruction, size)
-        except Exception:
-            self.repo.delete_session(session.id)
-            self.storage.delete_image(stored.storage_key)
-            raise
+        self.state = state or ConversationState()
 
     def send_message(
-        self, session_id: uuid.UUID, instruction: str, size: str
+        self,
+        message: str,
+        attachments: list[dict[str, object]],
+        size: str,
     ) -> AgentEnvelope:
-        if not instruction.strip():
-            raise AgentInputError("Please enter an edit instruction.")
-        state = self.repo.get_session_state(session_id)
-        if state is None:
-            raise AgentInputError("Session not found.")
-        if self._current_version(state) is None:
-            raise AgentInputError("Session has no active image.")
+        normalized_message = message.strip()
+        if not normalized_message and not attachments:
+            raise ConversationInputError("请输入消息或上传图片。")
 
-        self.repo.add_message(session_id, "user", instruction)
-        return self._run_turn(session_id, instruction, size)
-
-    def restore_version(
-        self, session_id: uuid.UUID, version_id: uuid.UUID
-    ) -> AgentEnvelope:
-        state = self.repo.get_session_state(session_id)
-        if state is None:
-            raise AgentInputError("Session not found.")
-        if not any(version.id == version_id for version in state.versions):
-            raise AgentInputError("Image version not found.")
-
-        self.repo.restore_version(session_id, version_id)
-        state = self.repo.get_session_state(session_id)
-        return self._envelope(state)
-
-    def get_session(self, session_id: uuid.UUID) -> AgentEnvelope:
-        state = self.repo.get_session_state(session_id)
-        if state is None:
-            raise AgentInputError("Session not found.")
-        return self._envelope(state)
-
-    def _run_turn(self, session_id: uuid.UUID, instruction: str, size: str) -> AgentEnvelope:
-        state = self.repo.get_session_state(session_id)
-        if state is None:
-            raise AgentInputError("Session not found.")
-        current = self._current_version(state)
-        if current is None:
-            raise AgentInputError("Session has no active image.")
+        stored_attachments = [
+            StoredAttachment(
+                id=_new_id("att"),
+                name=str(attachment["image_name"]),
+                mime_type=str(attachment["mime_type"]),
+                image_bytes=bytes(attachment["image_bytes"]),
+                created_at=datetime.now(UTC),
+            )
+            for attachment in attachments
+        ]
+        user_message = StoredMessage(
+            id=_new_id("msg"),
+            role="user",
+            content=normalized_message,
+            attachments=stored_attachments,
+            created_at=datetime.now(UTC),
+        )
+        self.state.messages.append(user_message)
+        if stored_attachments:
+            latest_attachment = stored_attachments[-1]
+            self.state.current_image = StoredImage(
+                id=_new_id("img"),
+                image_bytes=latest_attachment.image_bytes,
+                mime_type=latest_attachment.mime_type,
+                prompt=normalized_message or "Uploaded image",
+                revised_prompt=None,
+                model="user-upload",
+                created_at=latest_attachment.created_at,
+            )
+        self.state.updated_at = datetime.now(UTC)
 
         decision = self.planner(
-            user_message=instruction,
-            current_image_summary=f"Active image version {current.id}",
+            user_message=normalized_message,
             recent_messages=[
-                {"role": message.role, "content": message.content}
-                for message in state.messages[-8:]
+                {"role": item.role, "content": item.content}
+                for item in self.state.messages[-12:]
             ],
-            previous_response_id=state.session.previous_response_id,
+            has_current_image=self.state.current_image is not None,
+            uploaded_image_count=len(stored_attachments),
+            previous_response_id=self.state.previous_response_id,
         )
-        if decision.action == "clarify":
-            self.repo.set_previous_response_id(session_id, decision.response_id)
-            self.repo.add_message(
-                session_id,
-                "assistant",
-                decision.assistant_message,
+
+        if decision.action in {"answer", "clarify"}:
+            self._append_assistant_message(
+                content=decision.assistant_message,
                 response_id=decision.response_id,
             )
-            return self._envelope(
-                self.repo.get_session_state(session_id),
-                pending_question=decision.assistant_message,
-            )
+            self.state.previous_response_id = decision.response_id
+            return self._envelope()
+
+        image_source = stored_attachments[-1] if stored_attachments else self.state.current_image
+        if image_source is None:
+            self.state.messages.pop()
+            raise ConversationInputError("请先上传一张图片。")
 
         tool = self.tools.get(decision.tool_name or "")
         if tool is None:
             raise AgentServiceError("The selected agent tool is not available.")
 
-        result: AgentToolResult = tool.execute(
+        result = self._execute_image_tool(tool, decision, image_source, size)
+        current_image = StoredImage(
+            id=_new_id("img"),
+            image_bytes=result.image_bytes,
+            mime_type=result.mime_type,
+            prompt=result.prompt,
+            revised_prompt=result.revised_prompt,
+            model=result.model,
+            created_at=datetime.now(UTC),
+        )
+        self.state.current_image = current_image
+        self.state.previous_response_id = decision.response_id
+        self._append_assistant_message(
+            content=decision.assistant_message,
+            response_id=decision.response_id,
+            image=current_image,
+        )
+        return self._envelope()
+
+    def reset(self) -> AgentEnvelope:
+        self.state = ConversationState()
+        return self._envelope()
+
+    def _execute_image_tool(
+        self,
+        tool: AgentTool,
+        decision: ConversationTurnDecision,
+        image_source: StoredAttachment | StoredImage,
+        size: str,
+    ) -> AgentToolResult:
+        return tool.execute(
             AgentToolContext(
-                image_bytes=self.storage.read_image(current.storage_key),
-                image_name=current.storage_key,
-                mime_type=current.mime_type,
-                instruction=decision.tool_instruction or instruction,
+                image_bytes=image_source.image_bytes,
+                image_name=getattr(image_source, "name", "current-image.png"),
+                mime_type=image_source.mime_type,
+                instruction=decision.tool_instruction or "",
                 size=size,
             )
         )
-        stored = self.storage.write_image(result.image_bytes, result.mime_type)
-        version = self.repo.add_image_version(
-            session_id,
-            current.id,
-            stored.storage_key,
-            stored.mime_type,
-            result.prompt,
-            result.model,
-            revised_prompt=result.revised_prompt,
-        )
-        self.repo.set_current_version(session_id, version.id)
-        self.repo.set_previous_response_id(session_id, decision.response_id)
-        self.repo.add_message(
-            session_id,
-            "assistant",
-            decision.assistant_message,
-            response_id=decision.response_id,
-        )
-        return self._envelope(self.repo.get_session_state(session_id))
 
-    def _current_version(self, state: AgentSessionState):
-        return next(
-            (
-                version
-                for version in state.versions
-                if version.id == state.session.current_version_id
-            ),
-            None,
-        )
-
-    def _src_for_storage_key(self, storage_key: str, mime_type: str) -> str:
-        encoded = base64.b64encode(self.storage.read_image(storage_key)).decode("ascii")
-        return f"data:{mime_type};base64,{encoded}"
-
-    def _envelope(
-        self, state: AgentSessionState | None, pending_question: str | None = None
-    ) -> AgentEnvelope:
-        if state is None:
-            raise AgentInputError("Session not found.")
-        versions = [
-            ImageVersionDto(
-                id=version.id,
-                sessionId=version.session_id,
-                parentVersionId=version.parent_version_id,
-                src=self._src_for_storage_key(version.storage_key, version.mime_type),
-                storageKey=version.storage_key,
-                mimeType=version.mime_type,
-                width=version.width,
-                height=version.height,
-                prompt=version.prompt,
-                revisedPrompt=version.revised_prompt,
-                model=version.model,
-                createdAt=version.created_at,
+    def _append_assistant_message(
+        self,
+        content: str,
+        response_id: str | None,
+        image: StoredImage | None = None,
+    ) -> None:
+        self.state.messages.append(
+            StoredMessage(
+                id=_new_id("msg"),
+                role="assistant",
+                content=content,
+                response_id=response_id,
+                image=image,
+                created_at=datetime.now(UTC),
             )
-            for version in state.versions
-        ]
-        current = next(
-            (version for version in versions if version.id == state.session.current_version_id),
-            None,
         )
+        self.state.updated_at = datetime.now(UTC)
+
+    def _envelope(self) -> AgentEnvelope:
         return AgentEnvelope(
-            session=AgentSessionDto(
-                id=state.session.id,
-                title=state.session.title,
-                currentVersionId=state.session.current_version_id,
-                previousResponseId=state.session.previous_response_id,
-                status=state.session.status,
-                createdAt=state.session.created_at,
-                updatedAt=state.session.updated_at,
+            conversation=ConversationDto(
+                id=self.state.id,
+                title=self.state.title,
+                previousResponseId=self.state.previous_response_id,
+                status=self.state.status,
+                createdAt=self.state.created_at,
+                updatedAt=self.state.updated_at,
             ),
             messages=[
-                AgentMessageDto(
+                ConversationMessageDto(
                     id=message.id,
-                    sessionId=message.session_id,
                     role=message.role,
                     content=message.content,
+                    attachments=[
+                        ConversationAttachmentDto(
+                            id=attachment.id,
+                            name=attachment.name,
+                            mimeType=attachment.mime_type,
+                            src=_data_url(attachment.image_bytes, attachment.mime_type),
+                            createdAt=attachment.created_at,
+                        )
+                        for attachment in message.attachments
+                    ],
                     responseId=message.response_id,
-                    toolCallId=message.tool_call_id,
+                    image=_image_dto(message.image),
                     createdAt=message.created_at,
                 )
-                for message in state.messages
+                for message in self.state.messages
             ],
-            currentImage=current,
-            versions=versions,
-            pendingQuestion=pending_question,
+            currentImage=_image_dto(self.state.current_image),
             error=None,
         )
+
+
+ImageAgentService = ChatGptConversationService
+
+
+def _image_dto(image: StoredImage | None) -> ConversationImageDto | None:
+    if image is None:
+        return None
+    return ConversationImageDto(
+        id=image.id,
+        src=_data_url(image.image_bytes, image.mime_type),
+        mimeType=image.mime_type,
+        prompt=image.prompt,
+        revisedPrompt=image.revised_prompt,
+        model=image.model,
+        createdAt=image.created_at,
+    )
+
+
+def _data_url(image_bytes: bytes, mime_type: str) -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
