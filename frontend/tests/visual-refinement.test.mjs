@@ -67,26 +67,32 @@ test("product detail workbench still shows a non-empty canvas and persistent gen
   assert.match(productWorkbenchSource, /xl:grid-cols-\[/);
 });
 
-test("product detail workbench supports the simplified conversational generation workflow", () => {
+test("product detail workbench supports required upload and prompt preview workflow", () => {
   assert.match(toolsSource, /2048x2048/);
   assert.match(toolsSource, /2048x1152/);
   assert.match(toolsSource, /3840x2160/);
   assert.match(toolsSource, /2160x3840/);
 
-  assert.match(productWorkbenchSource, /optionalSourcePanel/);
+  assert.match(productWorkbenchSource, /requiredSourcePanel/);
   assert.match(productWorkbenchSource, /generationSettingsPanel/);
-  assert.match(productWorkbenchSource, /agentConversationPanel/);
-  assert.match(productWorkbenchSource, /可选上传原图/);
+  assert.match(productWorkbenchSource, /promptPreviewPanel/);
+  assert.match(productWorkbenchSource, /必须上传原图/);
   assert.match(productWorkbenchSource, /电商平台/);
   assert.match(productWorkbenchSource, /画面比例/);
   assert.match(productWorkbenchSource, /生成像素/);
   assert.match(productWorkbenchSource, /生成数量/);
-  assert.match(productWorkbenchSource, /Agent 对话调整/);
-  assert.match(productWorkbenchSource, /chatMessages\.map/);
-  assert.match(productWorkbenchSource, /chatInput/);
+  assert.match(productWorkbenchSource, /最终提示词预览/);
+  assert.match(productWorkbenchSource, /用户需求/);
+  assert.match(productWorkbenchSource, /只读预览/);
+  assert.match(productWorkbenchSource, /finalPromptPreview/);
+  assert.match(productWorkbenchSource, /userRequirement/);
+  assert.match(productWorkbenchSource, /if \(!file\)/);
   assert.match(productWorkbenchSource, /formData\.append\("aspectRatio", aspectRatio\)/);
   assert.match(productWorkbenchSource, /formData\.append\("imageCount", imageCount\)/);
-  assert.doesNotMatch(productWorkbenchSource, /required/);
+  assert.match(productWorkbenchSource, /formData\.append\("prompt", finalPromptPreview\)/);
+  assert.doesNotMatch(productWorkbenchSource, /chatMessages/);
+  assert.doesNotMatch(productWorkbenchSource, /chatInput/);
+  assert.doesNotMatch(productWorkbenchSource, /Agent Conversation/);
   assert.doesNotMatch(productWorkbenchSource, /productSceneStyles/);
   assert.doesNotMatch(productWorkbenchSource, /productVisualTones/);
   assert.doesNotMatch(productWorkbenchSource, /productCategory/);

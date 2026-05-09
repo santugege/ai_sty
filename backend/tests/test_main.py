@@ -68,6 +68,7 @@ def test_image_route_returns_validation_error(monkeypatch):
     response = client.post(
         "/api/images/generate",
         data={"toolId": "product", "size": "1536x1024", "imageCount": "3"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
     )
 
     assert response.status_code == 400
@@ -225,24 +226,8 @@ def test_image_route_passes_uploaded_product_image_to_openai_request(monkeypatch
     assert valid_request.image_type == "image/png"
 
 
-def test_image_route_allows_generation_without_uploaded_image(monkeypatch):
+def test_image_route_rejects_generation_without_uploaded_image(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    captured_request = {}
-
-    def fake_request_image_from_openai(valid_request, api_key, model):
-        captured_request["valid_request"] = valid_request
-        return GeneratedImageEnvelope.from_images(
-            [
-                GeneratedImageResult(src="data:image/png;base64,generated-1"),
-                GeneratedImageResult(src="data:image/png;base64,generated-2"),
-            ]
-        )
-
-    monkeypatch.setattr(
-        "app.main.request_image_from_openai",
-        fake_request_image_from_openai,
-    )
 
     response = client.post(
         "/api/images/generate",
@@ -257,31 +242,8 @@ def test_image_route_allows_generation_without_uploaded_image(monkeypatch):
         },
     )
 
-    assert response.status_code == 200
-    valid_request = captured_request["valid_request"]
-    assert valid_request.image_bytes is None
-    assert valid_request.size == "2048x2048"
-    assert valid_request.generation_settings.aspect_ratio == "1:1"
-    assert valid_request.generation_settings.image_count == 2
-    assert response.json() == {
-        "image": {
-            "src": "data:image/png;base64,generated-1",
-            "mimeType": "image/png",
-            "revisedPrompt": None,
-        },
-        "images": [
-            {
-                "src": "data:image/png;base64,generated-1",
-                "mimeType": "image/png",
-                "revisedPrompt": None,
-            },
-            {
-                "src": "data:image/png;base64,generated-2",
-                "mimeType": "image/png",
-                "revisedPrompt": None,
-            },
-        ],
-    }
+    assert response.status_code == 400
+    assert response.json() == {"error": "请上传商品图。"}
 
 
 def test_image_route_sanitizes_unexpected_error_message(monkeypatch):

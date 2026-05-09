@@ -89,28 +89,26 @@ def test_rejects_removed_tool_ids():
             raise AssertionError("Expected ImageRequestError")
 
 
-def test_allows_product_image_generation_without_upload():
-    result = run(
-        validate_image_form(
-            "product",
-            "平台：拼多多\n画面比例：1:1",
-            "2048x2048",
-            None,
-            "key",
-            platform_style="pinduoduo",
-            image_purpose="main-image",
-            aspect_ratio="1:1",
-            image_count="4",
+def test_rejects_product_image_generation_without_upload():
+    try:
+        run(
+            validate_image_form(
+                "product",
+                "平台：拼多多\n画面比例：1:1",
+                "2048x2048",
+                None,
+                "key",
+                platform_style="pinduoduo",
+                image_purpose="main-image",
+                aspect_ratio="1:1",
+                image_count="4",
+            )
         )
-    )
-
-    assert result.tool.id == "product"
-    assert result.image_bytes is None
-    assert result.size == "2048x2048"
-    assert result.generation_settings == ProductGenerationSettings(
-        aspect_ratio="1:1",
-        image_count=4,
-    )
+    except ImageRequestError as error:
+        assert error.status_code == 400
+        assert error.message == "请上传商品图。"
+    else:
+        raise AssertionError("Expected ImageRequestError")
 
 
 def test_rejects_unsupported_file_types():
@@ -260,7 +258,7 @@ def test_accepts_gpt_image_2_popular_sizes():
             "product",
             "横版直播封面",
             "3840x2160",
-            None,
+            upload_file(),
             "key",
             platform_style="douyin",
             image_purpose="promotion-image",
@@ -277,7 +275,7 @@ def test_rejects_unsupported_aspect_ratio():
                 "product",
                 "",
                 "1536x1024",
-                None,
+                upload_file(),
                 "key",
                 platform_style="pinduoduo",
                 image_purpose="main-image",
@@ -298,7 +296,7 @@ def test_rejects_unsupported_image_count():
                 "product",
                 "",
                 "1536x1024",
-                None,
+                upload_file(),
                 "key",
                 platform_style="pinduoduo",
                 image_purpose="main-image",

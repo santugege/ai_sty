@@ -161,16 +161,16 @@ image_tools: tuple[ImageTool, ...] = (
         mode="generate",
         prompt_label="商品场景",
         prompt_required=False,
-        image_required=False,
+        image_required=True,
         image_label="上传商品图",
         default_size="1536x1024",
         size_options=image_sizes,
         base_prompt=(
-            "Generate a clean ecommerce product visual. If a product image is "
-            "provided, preserve the product shape, color, logo, and important "
-            "details while changing the scene as requested. If no product image "
-            "is provided, create a commercially usable ecommerce direction draft "
-            "from the platform, purpose, aspect ratio, size, and user brief."
+            "Generate a clean ecommerce product visual from the uploaded product "
+            "image. Preserve the product shape, color, logo, package structure, "
+            "visible text, material cues, and important identifying details while "
+            "adapting the scene, composition, and commercial atmosphere requested "
+            "by the platform, purpose, aspect ratio, size, and user brief."
         ),
     ),
 )

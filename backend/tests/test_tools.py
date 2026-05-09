@@ -18,8 +18,11 @@ def test_product_tool_can_generate_or_edit():
     assert get_tool_by_id("product").mode == "generate"
 
 
-def test_product_tool_allows_optional_upload():
-    assert get_tool_by_id("product").image_required is False
+def test_product_tool_requires_original_upload():
+    tool = get_tool_by_id("product")
+
+    assert tool.image_required is True
+    assert "If no product image" not in tool.base_prompt
 
 
 def test_removed_tools_are_not_available():
