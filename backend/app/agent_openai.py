@@ -91,8 +91,8 @@ def request_agent_decision(
 
 def parse_conversation_turn_response(response: Any) -> ConversationTurnDecision:
     try:
-        payload = json.loads(response.output_text)
-    except (TypeError, json.JSONDecodeError) as error:
+        payload = _loads_response_payload(_response_output_text(response))
+    except (AttributeError, TypeError, json.JSONDecodeError) as error:
         raise RuntimeError("Agent decision response was not valid JSON.") from error
 
     if not isinstance(payload, dict):
@@ -126,3 +126,20 @@ def parse_conversation_turn_response(response: Any) -> ConversationTurnDecision:
         tool_instruction=tool_instruction,
         response_id=getattr(response, "id", None),
     )
+
+
+def _response_output_text(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    return response.output_text
+
+
+def _loads_response_payload(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise
+        return json.loads(text[start : end + 1])

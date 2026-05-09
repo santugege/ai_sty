@@ -74,6 +74,67 @@ def test_request_agent_decision_keeps_context_in_messages_not_previous_response_
     assert "Make it better" in encoded_input
 
 
+def test_request_agent_decision_accepts_raw_json_string_response():
+    class FakeResponses:
+        def create(self, **kwargs):
+            return (
+                '{"action":"edit","assistant_message":"I will edit it.",'
+                '"tool_name":"gpt_image_2_edit",'
+                '"tool_instruction":"Make it brighter."}'
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    decision = request_agent_decision(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Make it brighter",
+        current_image_summary="Current product image exists.",
+        recent_messages=[],
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    assert decision.action == "edit"
+    assert decision.tool_name == "gpt_image_2_edit"
+    assert decision.response_id is None
+
+
+def test_request_agent_decision_accepts_json_inside_markdown_response():
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                id="resp_markdown",
+                output_text=(
+                    "```json\n"
+                    '{"action":"edit","assistant_message":"I will edit it.",'
+                    '"tool_name":"gpt_image_2_edit",'
+                    '"tool_instruction":"Make it brighter."}'
+                    "\n```"
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    decision = request_agent_decision(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Make it brighter",
+        current_image_summary="Current product image exists.",
+        recent_messages=[],
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    assert decision.action == "edit"
+    assert decision.tool_instruction == "Make it brighter."
+    assert decision.response_id == "resp_markdown"
+
+
 def test_request_agent_decision_passes_base_url_to_client_factory():
     calls = []
 
