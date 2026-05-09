@@ -27,10 +27,13 @@ test("agent route renders the workbench", () => {
   assert.match(source, /AgentImageWorkbench/);
 });
 
-test("product workbench keeps the conversational adjustment entry", () => {
+test("product workbench uses prompt preview instead of embedded agent chat", () => {
   const source = readFileSync("src/components/product-workbench.tsx", "utf8");
 
-  assert.match(source, /agentConversationPanel/);
-  assert.match(source, /Agent 对话调整/);
-  assert.match(source, /chatMessages\.map/);
+  assert.match(source, /promptPreviewPanel/);
+  assert.match(source, /finalPromptPreview/);
+  assert.match(source, /userRequirement/);
+  assert.doesNotMatch(source, /agentConversationPanel/);
+  assert.doesNotMatch(source, /Agent Conversation/);
+  assert.doesNotMatch(source, /chatMessages\.map/);
 });

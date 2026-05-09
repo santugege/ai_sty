@@ -12,11 +12,10 @@ import {
 } from "react";
 import {
   AlertCircle,
+  FileText,
   ImageIcon,
   Loader2,
-  MessageSquareText,
   PackageOpen,
-  Send,
   Sparkles,
   Upload,
 } from "lucide-react";
@@ -45,12 +44,6 @@ type ProductWorkbenchVariant = "full" | "compact";
 
 type AspectRatio = "1:1" | "3:2" | "2:3" | "16:9" | "9:16";
 
-type ChatMessage = {
-  id: string;
-  role: "agent" | "user";
-  content: string;
-};
-
 const sampleShowcase = [
   {
     title: "平台主图",
@@ -63,7 +56,7 @@ const sampleShowcase = [
       "https://images.unsplash.com/photo-1541643600914-78b084683601?auto=format&fit=crop&w=900&q=80",
   },
   {
-    title: "对话迭代",
+    title: "提示词预览",
     image:
       "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80",
   },
@@ -109,15 +102,7 @@ export function ProductWorkbench({
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("1:1");
   const [imageCount, setImageCount] =
     useState<(typeof imageCountOptions)[number]>("1");
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "agent-ready",
-      role: "agent",
-      content:
-        "先选平台、比例、像素和数量。原图可以上传，也可以先空着生成方向稿。",
-    },
-  ]);
+  const [userRequirement, setUserRequirement] = useState("");
   const [size, setSize] = useState<ImageSize>(tool.defaultSize);
   const [resultSize, setResultSize] = useState<ImageSize>(tool.defaultSize);
   const [file, setFile] = useState<File | null>(null);
@@ -139,16 +124,20 @@ export function ProductWorkbench({
     () => getImageDimensions(resultSize),
     [resultSize],
   );
-  const fileLabel = file?.name || "可选上传原图";
-  const promptBrief = [
+  const fileLabel = file?.name || "必须上传原图";
+  const finalPromptPreview = [
+    "任务：基于用户上传的商品原图生成电商商品图。",
     `平台：${selectedPlatform?.label || platformStyle}`,
     `图片类型：${selectedPurpose?.label || imagePurpose}`,
     `画面比例：${selectedAspectRatio?.label || aspectRatio}`,
     `生成像素：${size}`,
     `生成数量：${imageCount}`,
-    chatInput.trim() ? `对话要求：${chatInput.trim()}` : "",
+    "原图保留：保持商品外形、颜色、logo、包装结构、可见文字、材质细节和可识别特征。",
+    "生成策略：结合电商平台和图片类型理解用户真实需求，输出适合上架或投放的商业图片。",
+    userRequirement.trim()
+      ? `用户需求：${userRequirement.trim()}`
+      : "用户需求：根据所选平台和图片类型生成清晰、高转化的商品图。",
   ]
-    .filter(Boolean)
     .join("\n");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -158,46 +147,31 @@ export function ProductWorkbench({
       return;
     }
 
+    if (!file) {
+      setError("请先上传商品原图。");
+      return;
+    }
+
     submitLockRef.current = true;
     setError("");
     setResult(null);
     setIsSubmitting(true);
 
-    const message = chatInput.trim();
-    if (message) {
-      setChatMessages((currentMessages) => [
-        ...currentMessages,
-        { id: `user-${Date.now()}`, role: "user", content: message },
-      ]);
-    }
-
     const formData = new FormData();
     formData.append("toolId", tool.id);
-    formData.append("prompt", promptBrief);
+    formData.append("prompt", finalPromptPreview);
     formData.append("size", size);
     formData.append("platformStyle", platformStyle);
     formData.append("imagePurpose", imagePurpose);
     formData.append("aspectRatio", aspectRatio);
     formData.append("imageCount", imageCount);
-
-    if (file) {
-      formData.append("image", file);
-    }
+    formData.append("image", file);
 
     try {
       const generatedImage = await submitImageGenerationForm(formData);
 
       setResultSize(size);
       setResult(generatedImage);
-      setChatInput("");
-      setChatMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          id: `agent-${Date.now()}`,
-          role: "agent",
-          content: "已按当前参数生成一版结果，可以继续用一句话让我调整。",
-        },
-      ]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : genericErrorMessage);
     } finally {
@@ -242,13 +216,13 @@ export function ProductWorkbench({
           <label
             htmlFor="product-image"
             className={classNames(
-              "optionalSourcePanel block group cursor-pointer",
+              "requiredSourcePanel block group cursor-pointer",
               isCompact ? "mt-4" : "mt-6",
               isSubmitting && "cursor-not-allowed opacity-50",
             )}
           >
             <span className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-ink-lighter group-hover:text-cyan">
-              01 // 可选上传原图
+              01 // 必须上传原图
             </span>
             <span
               className={classNames(
@@ -272,13 +246,14 @@ export function ProductWorkbench({
                   isCompact && "sr-only",
                 )}
               >
-                支持 PNG / JPG / WebP；不上传时先生成方向稿。
+                支持 PNG / JPG / WebP；生成会严格基于这张商品原图。
               </span>
             </span>
             <input
               id="product-image"
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              aria-required="true"
               disabled={isSubmitting}
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               className="sr-only"
@@ -453,54 +428,42 @@ export function ProductWorkbench({
 
         <aside
           className={classNames(
-            "rightInspector agentConversationPanel flex min-w-0 flex-col bg-surface",
+            "rightInspector promptPreviewPanel flex min-w-0 flex-col bg-surface",
             isCompact
               ? "max-h-[34rem] overflow-hidden p-3 sm:p-4 xl:max-h-full xl:min-h-0"
               : "max-h-[calc(100vh-8rem)] overflow-y-auto p-5 sm:p-6 xl:max-h-none",
           )}
         >
           <PanelHeader
-            icon={<MessageSquareText aria-hidden="true" className="h-5 w-5" />}
-            eyebrow="Agent Conversation"
-            title="Agent 对话调整"
+            icon={<FileText aria-hidden="true" className="h-5 w-5" />}
+            eyebrow="Prompt Preview"
+            title="最终提示词预览"
             compact={isCompact}
           />
 
-          <div
-            className={classNames(
-              "grid min-h-0 flex-1 content-start overflow-y-auto pr-1",
-              isCompact ? "mt-4 gap-2" : "mt-6 gap-3",
-            )}
-          >
-            {chatMessages.map((message) => (
-              <article
-                key={message.id}
-                className={classNames(
-                  "rounded-2xl border text-sm leading-6",
-                  isCompact ? "px-3 py-2.5" : "px-4 py-3",
-                  message.role === "user"
-                    ? "border-cyan bg-accent-soft text-ink"
-                    : "border-border bg-paper-subtle text-ink-light",
-                )}
-              >
-                <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan">
-                  {message.role === "user" ? "You" : "Agent"}
-                </p>
-                {message.content}
-              </article>
-            ))}
-          </div>
-
-          <FieldLabel title="调整方向">
+          <FieldLabel title="用户需求">
             <textarea
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
+              value={userRequirement}
+              onChange={(event) => setUserRequirement(event.target.value)}
               placeholder="例如：背景更干净，商品放大，保留包装文字，右侧留促销空间"
               rows={isCompact ? 3 : 4}
               disabled={isSubmitting}
               className={classNames(
-                "chatInput w-full resize-none rounded-2xl border border-border bg-paper-subtle px-4 text-sm leading-6 text-ink outline-none transition-refined placeholder:text-ink-lighter focus:border-cyan disabled:opacity-50",
+                "userRequirementInput w-full resize-none rounded-2xl border border-border bg-paper-subtle px-4 text-sm leading-6 text-ink outline-none transition-refined placeholder:text-ink-lighter focus:border-cyan disabled:opacity-50",
                 isCompact ? "mt-2 py-2.5" : "mt-3 py-3",
+              )}
+            />
+          </FieldLabel>
+
+          <FieldLabel title="只读预览">
+            <textarea
+              value={finalPromptPreview}
+              readOnly
+              aria-label="只读预览"
+              rows={isCompact ? 10 : 13}
+              className={classNames(
+                "finalPromptPreview mt-2 w-full flex-1 resize-none rounded-2xl border border-border bg-paper-subtle px-4 py-3 font-mono text-xs leading-6 text-ink-light outline-none [overflow-wrap:anywhere]",
+                isCompact ? "min-h-48" : "min-h-72",
               )}
             />
           </FieldLabel>
@@ -532,22 +495,13 @@ export function ProductWorkbench({
           >
             {isSubmitting ? (
               <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
-            ) : chatInput.trim() ? (
-              <Send
-                aria-hidden="true"
-                className="h-5 w-5 transition-refined group-hover:scale-110"
-              />
             ) : (
               <Sparkles
                 aria-hidden="true"
                 className="h-5 w-5 transition-refined group-hover:scale-110"
               />
             )}
-            {isSubmitting
-              ? "生成中..."
-              : chatInput.trim()
-                ? "发送调整并生成"
-                : "生成商品图"}
+            {isSubmitting ? "生成中..." : "生成商品图"}
           </button>
         </aside>
       </form>
