@@ -35,7 +35,6 @@ def request_conversation_turn(
     client = client_factory(**openai_client_kwargs(api_key, base_url))
     response = client.responses.create(
         model=agent_model,
-        previous_response_id=previous_response_id,
         input=[
             {
                 "role": "system",

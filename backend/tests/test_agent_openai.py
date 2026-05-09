@@ -35,13 +35,13 @@ def test_request_agent_decision_returns_edit_decision_from_gpt_5_5():
     )
 
     assert calls[0]["model"] == "gpt-5.5"
-    assert calls[0]["previous_response_id"] is None
+    assert "previous_response_id" not in calls[0]
     assert decision.action == "edit"
     assert decision.tool_name == "gpt_image_2_edit"
     assert decision.response_id == "resp_123"
 
 
-def test_request_agent_decision_passes_previous_response_id():
+def test_request_agent_decision_keeps_context_in_messages_not_previous_response_id():
     calls = []
 
     class FakeResponses:
@@ -69,7 +69,9 @@ def test_request_agent_decision_passes_previous_response_id():
         client_factory=FakeClient,
     )
 
-    assert calls[0]["previous_response_id"] == "resp_previous"
+    assert "previous_response_id" not in calls[0]
+    encoded_input = calls[0]["input"][1]["content"]
+    assert "Make it better" in encoded_input
 
 
 def test_request_agent_decision_passes_base_url_to_client_factory():
