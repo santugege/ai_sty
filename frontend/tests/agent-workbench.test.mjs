@@ -2,15 +2,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("agent api client calls the single in-memory conversation routes", () => {
+test("agent api client uses persisted session routes", () => {
   const source = readFileSync("src/lib/agent-api.ts", "utf8");
 
-  assert.match(source, /\/api\/agent\/conversation/);
-  assert.match(source, /sendConversationMessage/);
-  assert.match(source, /resetConversation/);
-  assert.doesNotMatch(source, /createAgentSession/);
-  assert.doesNotMatch(source, /restoreAgentVersion/);
-  assert.doesNotMatch(source, /\/api\/agent\/sessions/);
+  assert.match(source, /listAgentSessions/);
+  assert.match(source, /createAgentSession/);
+  assert.match(source, /getAgentSession/);
+  assert.match(source, /sendAgentSessionMessage/);
+  assert.match(source, /\/api\/agent\/sessions/);
 });
 
 test("agent workbench renders a ChatGPT-style conversation composer", () => {

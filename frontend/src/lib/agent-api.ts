@@ -30,10 +30,24 @@ export type ConversationMessage = {
   createdAt: string;
 };
 
+export type ConversationListItem = {
+  id: string;
+  title: string;
+  summary?: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ConversationListEnvelope = {
+  sessions: ConversationListItem[];
+};
+
 export type AgentEnvelope = {
   conversation: {
     id: string;
     title: string;
+    summary?: string | null;
     previousResponseId?: string | null;
     status: string;
     createdAt: string;
@@ -43,6 +57,41 @@ export type AgentEnvelope = {
   currentImage?: ConversationImage | null;
   error?: string | null;
 };
+
+export async function listAgentSessions(): Promise<ConversationListEnvelope> {
+  return readJsonResponse(
+    await fetch(`${apiBaseUrl}/api/agent/sessions`, { method: "GET" }),
+  );
+}
+
+export async function createAgentSession(formData: FormData) {
+  return readAgentResponse(
+    await fetch(`${apiBaseUrl}/api/agent/sessions`, {
+      method: "POST",
+      body: formData,
+    }),
+  );
+}
+
+export async function getAgentSession(sessionId: string) {
+  return readAgentResponse(
+    await fetch(`${apiBaseUrl}/api/agent/sessions/${sessionId}`, {
+      method: "GET",
+    }),
+  );
+}
+
+export async function sendAgentSessionMessage(
+  sessionId: string,
+  formData: FormData,
+) {
+  return readAgentResponse(
+    await fetch(`${apiBaseUrl}/api/agent/sessions/${sessionId}/messages`, {
+      method: "POST",
+      body: formData,
+    }),
+  );
+}
 
 export async function sendConversationMessage(formData: FormData) {
   return readAgentResponse(
@@ -62,11 +111,13 @@ export async function resetConversation() {
 }
 
 async function readAgentResponse(response: Response): Promise<AgentEnvelope> {
-  const payload = (await response.json()) as AgentEnvelope | { error?: string };
+  return readJsonResponse<AgentEnvelope>(response);
+}
 
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const payload = (await response.json()) as T & { error?: string };
   if (!response.ok || "error" in payload) {
     throw new Error(payload.error || "Agent request failed.");
   }
-
-  return payload as AgentEnvelope;
+  return payload;
 }
