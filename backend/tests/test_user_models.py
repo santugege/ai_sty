@@ -30,13 +30,39 @@ def test_user_unique_constraints_are_declared():
     assert columns["username"].unique is True
 
 
+def test_user_column_nullability_and_defaults_match_account_design():
+    columns = UserRow.__table__.columns
+
+    assert columns["user_id"].nullable is False
+    assert columns["email"].nullable is False
+    assert columns["username"].nullable is False
+    assert columns["password_hash"].nullable is False
+    assert columns["is_admin"].default.arg is False
+    assert columns["is_active"].default.arg is True
+
+
 def test_users_migration_exists_and_does_not_allow_admin_promotion_fields():
     migration = Path(
         "backend/alembic/versions/20260510_0004_users.py"
     ).read_text(encoding="utf-8")
 
+    assert 'revision = "20260510_0004"' in migration
+    assert 'down_revision = "20260510_0003"' in migration
     assert 'op.create_table("users"' in migration
     assert '"user_id"' in migration
     assert '"is_admin"' in migration
+    assert (
+        'op.create_index("ix_users_user_id", "users", ["user_id"], unique=True)'
+        in migration
+    )
+    assert 'op.create_index("ix_users_email", "users", ["email"], unique=True)' in migration
+    assert (
+        'op.create_index("ix_users_username", "users", ["username"], unique=True)'
+        in migration
+    )
+    assert 'op.drop_index("ix_users_username", table_name="users")' in migration
+    assert 'op.drop_index("ix_users_email", table_name="users")' in migration
+    assert 'op.drop_index("ix_users_user_id", table_name="users")' in migration
+    assert 'op.drop_table("users")' in migration
     assert "roles" not in migration
     assert "permissions" not in migration
