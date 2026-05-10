@@ -3,5 +3,13 @@ export function safeNextPath(value: string | null): string {
     return "/";
   }
 
+  try {
+    if (decodeURIComponent(value).includes("\\")) {
+      return "/";
+    }
+  } catch {
+    return "/";
+  }
+
   return value;
 }

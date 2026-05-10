@@ -208,6 +208,10 @@ test("login next redirect is constrained to safe local paths", async () => {
   assert.equal(safeNextPath("https://example.com"), "/");
   assert.equal(safeNextPath("//example.com/path"), "/");
   assert.equal(safeNextPath("javascript:alert(1)"), "/");
+  assert.equal(safeNextPath("/\\evil.com/path"), "/");
+  assert.equal(safeNextPath("/%5Cevil.com/path"), "/");
+  assert.equal(safeNextPath("/%5C%5Cevil.com/path"), "/");
+  assert.equal(safeNextPath("/%5cevil.com/path"), "/");
 });
 
 test("app navigation hides account management from regular users", () => {
