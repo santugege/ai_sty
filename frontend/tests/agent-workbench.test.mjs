@@ -116,7 +116,7 @@ test("agent workbench renders session list and sends to active session", () => {
   assert.match(source, /sendAgentSessionMessage/);
   assert.match(source, /sessions\.map/);
   assert.match(source, /activeSessionId/);
-  assert.match(source, /New conversation|新会话/);
+  assert.match(source, /新会话/);
 });
 
 test("agent workbench guards async session loads and clears drafts on session changes", () => {
@@ -168,8 +168,9 @@ test("agent route renders the workbench", () => {
 });
 
 test("homepage labels the agent route as ChatGPT-style conversation", () => {
-  const source = readFileSync("src/app/page.tsx", "utf8");
+  const source = readFileSync("src/components/app-nav.tsx", "utf8");
 
   assert.match(source, /ChatGPT 对话/);
   assert.doesNotMatch(source, /多轮编辑/);
 });
+

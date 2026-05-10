@@ -3,6 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const pageSource = readFileSync(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+const appNavSource = readFileSync(
+  new URL("../src/components/app-nav.tsx", import.meta.url),
+  "utf8",
+);
 const toolsSource = readFileSync(new URL("../src/lib/tools.ts", import.meta.url), "utf8");
 const productWorkbenchSource = readFileSync(
   new URL("../src/components/product-workbench.tsx", import.meta.url),
@@ -15,13 +19,14 @@ const homeProductWorkbenchPath = new URL(
 
 test("homepage keeps only the rail and compact product workbench", () => {
   assert.match(pageSource, /homepageShell/);
-  assert.match(pageSource, /homepageRail/);
+  assert.match(pageSource, /AppNav/);
+  assert.match(appNavSource, /homepageRail/);
   assert.match(pageSource, /homepageWorkbenchDock/);
   assert.match(pageSource, /ProductWorkbench/);
   assert.match(pageSource, /variant="compact"/);
   assert.match(pageSource, /getToolById\("product"\)/);
   assert.match(pageSource, /notFound/);
-  assert.match(pageSource, /href: "\/agent"/);
+  assert.match(appNavSource, /href: "\/agent"/);
   assert.doesNotMatch(pageSource, /homepageBriefing/);
   assert.doesNotMatch(pageSource, /AI Ecommerce Command/);
   assert.doesNotMatch(pageSource, /电商商品图首页/);

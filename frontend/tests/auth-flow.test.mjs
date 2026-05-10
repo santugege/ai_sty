@@ -181,3 +181,39 @@ test("auth provider protects private routes and leaves login register public", (
   assert.match(source, /AuthContext/);
   assert.match(source, /finally[\s\S]*setUser\(null\)[\s\S]*router\.replace\("\/login"\)/);
 });
+
+test("login and register pages submit account forms", () => {
+  const loginSource = readFileSync("src/app/login/page.tsx", "utf8");
+  const registerSource = readFileSync("src/app/register/page.tsx", "utf8");
+
+  assert.match(loginSource, /loginAccount/);
+  assert.match(loginSource, /邮箱/);
+  assert.match(loginSource, /密码/);
+  assert.match(loginSource, /router\.replace/);
+  assert.match(loginSource, /refreshUser\(\)/);
+  assert.match(registerSource, /registerAccount/);
+  assert.match(registerSource, /用户名/);
+  assert.match(registerSource, /邮箱/);
+  assert.match(registerSource, /密码/);
+  assert.match(registerSource, /refreshUser\(\)/);
+});
+
+test("app navigation hides account management from regular users", () => {
+  const source = readFileSync("src/components/app-nav.tsx", "utf8");
+
+  assert.match(source, /user\?\.isAdmin/);
+  assert.match(source, /\/admin\/accounts/);
+  assert.match(source, /账号管理/);
+  assert.match(source, /logout/);
+});
+
+test("admin accounts page does not provide admin promotion", () => {
+  const source = readFileSync("src/app/admin/accounts/page.tsx", "utf8");
+
+  assert.match(source, /listUsers/);
+  assert.match(source, /updateUser/);
+  assert.match(source, /resetUserPassword/);
+  assert.match(source, /isActive/);
+  assert.doesNotMatch(source, /isAdmin: true/);
+  assert.doesNotMatch(source, /设置为管理员/);
+});
