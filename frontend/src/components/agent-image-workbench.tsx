@@ -94,6 +94,7 @@ export function AgentImageWorkbench() {
     if (requestId !== undefined && !isCurrentRequest(requestId)) {
       return;
     }
+    setIsLoadingSessions(false);
     setSessions(envelope.sessions);
     const resolvedActiveId = nextActiveId ?? envelope.sessions[0]?.id ?? null;
     setActiveSessionId(resolvedActiveId);
@@ -245,6 +246,7 @@ export function AgentImageWorkbench() {
         if (!isCurrentRequest(requestId)) {
           return;
         }
+        setIsLoadingSessions(false);
         setSessions((previous) =>
           previous.some((session) => session.id === envelope.conversation.id)
             ? previous

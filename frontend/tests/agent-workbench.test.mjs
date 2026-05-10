@@ -124,6 +124,8 @@ test("agent workbench guards async session loads and clears drafts on session ch
   assert.match(source, /handleSelectSession[\s\S]*clearDraft/);
   assert.match(source, /handleNewSession[\s\S]*beginRequest/);
   assert.match(source, /disabled=\{isSubmitting\}[\s\S]*handleSelectSession/);
+  assert.match(source, /refreshSessions[\s\S]*setIsLoadingSessions\(false\)/);
+  assert.match(source, /catch \(refreshError\)[\s\S]*setIsLoadingSessions\(false\)/);
 });
 
 test("agent workbench revokes discarded previews and keeps composer controls responsive", () => {
