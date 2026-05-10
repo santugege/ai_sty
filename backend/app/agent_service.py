@@ -296,7 +296,6 @@ class ChatGptConversationService:
                 parent_version = version
                 uploaded_versions.append(version)
 
-            linked_user_version_id = uploaded_versions[-1].id if uploaded_versions else None
             user_message = self.repo.add_message(
                 parsed_session_id,
                 role="user",

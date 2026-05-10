@@ -60,20 +60,23 @@ class AgentRepository:
             tool_call_id=tool_call_id,
             image_version_id=linked_version_id,
         )
-        self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
-        for position, version_id in enumerate(linked_version_ids):
-            self.db.add(
-                AgentMessageImageVersionRow(
-                    message_id=row.id,
-                    image_version_id=version_id,
-                    position=position,
+        try:
+            self.db.add(row)
+            self.db.flush()
+            for position, version_id in enumerate(linked_version_ids):
+                self.db.add(
+                    AgentMessageImageVersionRow(
+                        message_id=row.id,
+                        image_version_id=version_id,
+                        position=position,
+                    )
                 )
-            )
-        if linked_version_ids:
             self.db.commit()
-            self.db.refresh(row)
+        except Exception:
+            self.db.rollback()
+            raise
+
+        self.db.refresh(row)
         return row
 
     def list_sessions(self) -> list[AgentSessionRow]:
@@ -322,7 +325,11 @@ class AgentRepository:
         self, session_id: uuid.UUID, version_ids: list[uuid.UUID]
     ) -> list[uuid.UUID]:
         valid = []
+        seen = set()
         for version_id in version_ids:
+            if version_id in seen:
+                continue
+            seen.add(version_id)
             version = self._get_session_version(session_id, version_id)
             if version is not None:
                 valid.append(version.id)

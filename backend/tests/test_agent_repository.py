@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime, timezone
 import inspect
 
-from sqlalchemy import create_engine
+import pytest
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.agent_models import AgentMessageImageVersionRow, AgentSessionRow, ImageVersionRow
@@ -143,6 +144,77 @@ def test_add_message_can_link_multiple_image_versions_in_order():
     assert state.messages == [message]
     assert state.messages[0].image_version_id == second.id
     assert state.message_image_versions[message.id] == [first.id, second.id]
+
+
+def test_add_message_deduplicates_repeated_image_version_links():
+    repo = make_repo()
+    session = repo.create_session("Repeated upload")
+    version = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/session/repeated.png",
+        mime_type="image/png",
+        prompt="repeated",
+        model="user-upload",
+    )
+
+    message = repo.add_message(
+        session_id=session.id,
+        role="user",
+        content="Use this twice.",
+        image_version_ids=[version.id, version.id],
+    )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == [message]
+    assert state.messages[0].image_version_id == version.id
+    assert state.message_image_versions[message.id] == [version.id]
+
+
+def test_add_message_rolls_back_message_when_image_link_insert_fails():
+    repo = make_repo()
+    session = repo.create_session("Atomic link failure")
+    version = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/session/upload.png",
+        mime_type="image/png",
+        prompt="upload",
+        model="user-upload",
+    )
+
+    def fail_link_insert(*args):
+        raise RuntimeError("link insert failed")
+
+    event.listen(AgentMessageImageVersionRow, "before_insert", fail_link_insert)
+    try:
+        with pytest.raises(RuntimeError, match="link insert failed"):
+            repo.add_message(
+                session_id=session.id,
+                role="user",
+                content="This should roll back.",
+                image_version_ids=[version.id],
+            )
+    finally:
+        event.remove(AgentMessageImageVersionRow, "before_insert", fail_link_insert)
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == []
+    assert state.message_image_versions == {}
+    assert repo.db.query(AgentMessageImageVersionRow).count() == 0
+
+    persisted = repo.add_message(
+        session_id=session.id,
+        role="user",
+        content="Session is usable.",
+        image_version_id=version.id,
+    )
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == [persisted]
+    assert state.message_image_versions[persisted.id] == [version.id]
 
 
 def test_add_message_ignores_cross_session_image_versions_for_multi_links():
