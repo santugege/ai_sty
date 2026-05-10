@@ -301,7 +301,13 @@ def test_persistent_edit_turn_uses_stored_current_image_and_persists_generated_v
     assert storage.read_image(state.versions[-1].storage_key) == b"edited-image"
     assert edited.currentImage is not None
     assert edited.currentImage.src.endswith("ZWRpdGVkLWltYWdl")
-    assert edited.messages[-1].imageVersionId == str(state.versions[-1].id)
+    assistant_message = edited.messages[-1]
+    assert assistant_message.imageVersionId == str(state.versions[-1].id)
+    assert assistant_message.attachments == []
+    assert assistant_message.image is not None
+    assert assistant_message.image.model == "gpt-image-2"
+    assert assistant_message.image.prompt == "Make the background white."
+    assert assistant_message.image.src.endswith("ZWRpdGVkLWltYWdl")
 
 
 def test_failed_persistent_edit_without_current_image_rolls_back_user_message():
