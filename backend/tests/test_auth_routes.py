@@ -329,6 +329,45 @@ def test_agent_sessions_require_login():
     assert response.json() == {"error": "请先登录。"}
 
 
+def test_create_agent_session_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.post(
+            "/api/agent/sessions",
+            data={"message": "商品图", "size": "1536x1024"},
+        )
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
+def test_get_agent_session_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.get("/api/agent/sessions/11111111-1111-1111-1111-111111111111")
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
+def test_send_agent_session_message_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.post(
+            "/api/agent/sessions/11111111-1111-1111-1111-111111111111/messages",
+            data={"message": "商品图", "size": "1536x1024"},
+        )
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
 def test_agent_conversation_requires_login():
     client, _ = make_client()
     try:

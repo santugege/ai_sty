@@ -390,7 +390,7 @@ async def send_conversation_message(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
 ):
     try:
         attachments = await read_conversation_uploads(images)
@@ -408,7 +408,7 @@ async def send_conversation_message(
 
 @app.post("/api/agent/conversation/reset")
 async def reset_conversation(
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
 ):
     try:
         envelope = await run_in_threadpool(
@@ -422,7 +422,7 @@ async def reset_conversation(
 
 @app.get("/api/agent/sessions")
 async def list_agent_sessions(
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -437,7 +437,7 @@ async def create_agent_session(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -455,7 +455,7 @@ async def create_agent_session(
 @app.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(
     session_id: UUID,
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -471,7 +471,7 @@ async def send_agent_session_message(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -504,7 +504,7 @@ async def generate_image(
     aspectRatio: str = Form(""),
     imageCount: str = Form(""),
     image: UploadFile | None = File(None),
-    current_user: UserRow = Depends(get_current_user),
+    _current_user: UserRow = Depends(get_current_user),
 ):
     try:
         api_key = os.getenv("OPENAI_API_KEY")
