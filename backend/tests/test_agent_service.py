@@ -1,11 +1,18 @@
-import pytest
+import uuid
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.agent_repository import AgentRepository
 from app.agent_service import (
     ChatGptConversationService,
     ConversationInputError,
     ConversationTurnDecision,
 )
 from app.agent_tools import AgentToolContext, AgentToolResult
+from app.db import Base
+from app.image_storage import StoredImage
 
 
 class FakeTool:
@@ -41,6 +48,68 @@ def make_service(decision: ConversationTurnDecision, tool=None):
     return service, planner_calls, image_tool
 
 
+class FakeImageStorage:
+    def __init__(self):
+        self.objects = {}
+        self.writes = []
+
+    def write_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        prefix: str = "agent-sessions",
+    ) -> StoredImage:
+        storage_key = f"{prefix}/image-{len(self.objects) + 1}.png"
+        self.objects[storage_key] = bytes(image_bytes)
+        self.writes.append(
+            {
+                "storage_key": storage_key,
+                "image_bytes": bytes(image_bytes),
+                "mime_type": mime_type,
+                "prefix": prefix,
+            }
+        )
+        return StoredImage(storage_key=storage_key, mime_type=mime_type)
+
+    def read_image(self, storage_key: str) -> bytes:
+        return self.objects[storage_key]
+
+
+def make_repo() -> AgentRepository:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return AgentRepository(Session(engine))
+
+
+def make_persistent_service(
+    decisions: ConversationTurnDecision | list[ConversationTurnDecision],
+    tool=None,
+    repo: AgentRepository | None = None,
+    storage: FakeImageStorage | None = None,
+    summarizer=None,
+):
+    planner_calls = []
+    decision_list = (
+        decisions if isinstance(decisions, list) else [decisions]
+    )
+
+    def fake_planner(**kwargs):
+        planner_calls.append(kwargs)
+        index = min(len(planner_calls) - 1, len(decision_list) - 1)
+        return decision_list[index]
+
+    image_tool = tool or FakeTool()
+    image_storage = storage or FakeImageStorage()
+    service = ChatGptConversationService(
+        planner=fake_planner,
+        tools={"gpt_image_2_edit": image_tool},
+        repo=repo or make_repo(),
+        storage=image_storage,
+        summarizer=summarizer,
+    )
+    return service, planner_calls, image_tool, image_storage
+
+
 def test_first_turn_stores_messages_and_uploaded_image_in_memory():
     service, planner_calls, tool = make_service(
         ConversationTurnDecision(
@@ -72,6 +141,174 @@ def test_first_turn_stores_messages_and_uploaded_image_in_memory():
     assert envelope.currentImage.prompt == "Make the background cleaner."
     assert tool.calls[0].image_bytes == b"input-image"
     assert planner_calls[0]["recent_messages"][0]["role"] == "user"
+
+
+def test_create_session_persists_conversation_and_uploaded_image():
+    service, _planner_calls, _tool, storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="answer",
+            assistant_message="I can edit this image.",
+            tool_name=None,
+            tool_instruction=None,
+            response_id="resp_1",
+        )
+    )
+
+    envelope = service.create_session(
+        message="Make this image cleaner.",
+        attachments=[
+            {
+                "image_bytes": b"input-image",
+                "image_name": "product.png",
+                "mime_type": "image/png",
+            }
+        ],
+        size="1536x1024",
+    )
+
+    session_id = uuid.UUID(envelope.conversation.id)
+    state = service.repo.get_session_state(session_id)
+    assert state is not None
+    assert [message.role for message in state.messages] == ["user", "assistant"]
+    assert state.messages[0].content == "Make this image cleaner."
+    assert state.messages[1].content == "I can edit this image."
+    assert len(storage.objects) == 1
+    assert envelope.currentImage is not None
+    assert envelope.currentImage.model == "user-upload"
+    assert envelope.messages[0].imageVersionId == str(state.versions[0].id)
+
+
+def test_sessions_keep_separate_previous_response_ids():
+    repo = make_repo()
+    storage = FakeImageStorage()
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "First done.", None, None, "resp_1"),
+            ConversationTurnDecision("answer", "Second done.", None, None, "resp_2"),
+        ],
+        repo=repo,
+        storage=storage,
+    )
+
+    first = service.create_session("First session", [], "1536x1024")
+    second = service.create_session("Second session", [], "1536x1024")
+
+    first_state = repo.get_session_state(uuid.UUID(first.conversation.id))
+    second_state = repo.get_session_state(uuid.UUID(second.conversation.id))
+    assert first_state is not None
+    assert second_state is not None
+    assert first_state.session.previous_response_id == "resp_1"
+    assert second_state.session.previous_response_id == "resp_2"
+
+
+def test_send_message_uses_target_session_summary_and_recent_messages():
+    service, planner_calls, _tool, _storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "First answer.", None, None, "resp_1"),
+            ConversationTurnDecision("answer", "Follow-up answer.", None, None, "resp_2"),
+        ]
+    )
+    envelope = service.create_session("Start a session", [], "1536x1024")
+    session_id = uuid.UUID(envelope.conversation.id)
+    service.repo.update_session_summary(session_id, "Existing summary")
+
+    service.send_session_message(
+        session_id=session_id,
+        message="Use the previous direction.",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    follow_up_call = planner_calls[1]
+    assert follow_up_call["summary"] == "Existing summary"
+    assert follow_up_call["previous_response_id"] == "resp_1"
+    assert [message["content"] for message in follow_up_call["recent_messages"]] == [
+        "Start a session",
+        "First answer.",
+        "Use the previous direction.",
+    ]
+
+
+def test_persistent_edit_turn_uses_stored_current_image_and_persists_generated_version():
+    service, _planner_calls, tool, storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "I can edit it.", None, None, "resp_1"),
+            ConversationTurnDecision(
+                action="edit",
+                assistant_message="Edited against the current image.",
+                tool_name="gpt_image_2_edit",
+                tool_instruction="Make the background white.",
+                response_id="resp_2",
+            ),
+        ]
+    )
+    envelope = service.create_session(
+        "Use this product photo",
+        [
+            {
+                "image_bytes": b"input-image",
+                "image_name": "product.png",
+                "mime_type": "image/png",
+            }
+        ],
+        "1536x1024",
+    )
+
+    edited = service.send_session_message(
+        session_id=envelope.conversation.id,
+        message="Make it white.",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    state = service.repo.get_session_state(uuid.UUID(envelope.conversation.id))
+    assert state is not None
+    assert tool.calls[-1].image_bytes == b"input-image"
+    assert len(state.versions) == 2
+    assert state.session.current_version_id == state.versions[-1].id
+    assert state.versions[-1].parent_version_id == state.versions[0].id
+    assert state.messages[-1].role == "assistant"
+    assert state.messages[-1].image_version_id == state.versions[-1].id
+    assert storage.read_image(state.versions[-1].storage_key) == b"edited-image"
+    assert edited.currentImage is not None
+    assert edited.currentImage.src.endswith("ZWRpdGVkLWltYWdl")
+    assert edited.messages[-1].imageVersionId == str(state.versions[-1].id)
+
+
+def test_summary_refresh_persists_summarizer_result_with_recent_messages():
+    summarizer_calls = []
+
+    def fake_summarizer(**kwargs):
+        summarizer_calls.append(kwargs)
+        return "Session summary"
+
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "Assistant 1.", None, None, "resp_1"),
+            ConversationTurnDecision("answer", "Assistant 2.", None, None, "resp_2"),
+            ConversationTurnDecision("answer", "Assistant 3.", None, None, "resp_3"),
+        ],
+        summarizer=fake_summarizer,
+    )
+    envelope = service.create_session("User 1", [], "1536x1024")
+    session_id = uuid.UUID(envelope.conversation.id)
+
+    service.send_session_message(session_id, "User 2", [], "1536x1024")
+    service.send_session_message(session_id, "User 3", [], "1536x1024")
+
+    state = service.repo.get_session_state(session_id)
+    assert state is not None
+    assert state.session.summary == "Session summary"
+    assert summarizer_calls
+    assert summarizer_calls[-1]["previous_summary"] is None
+    assert [message["content"] for message in summarizer_calls[-1]["recent_messages"]] == [
+        "User 1",
+        "Assistant 1.",
+        "User 2",
+        "Assistant 2.",
+        "User 3",
+        "Assistant 3.",
+    ]
 
 
 def test_follow_up_without_new_upload_uses_current_image_context():
