@@ -22,6 +22,10 @@ class AgentSessionRow(Base):
     )
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     previous_response_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
@@ -51,12 +55,18 @@ class AgentMessageRow(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     response_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("image_versions.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
 
     session: Mapped[AgentSessionRow] = relationship(
         "AgentSessionRow", back_populates="messages"
+    )
+    image_version: Mapped[ImageVersionRow | None] = relationship(
+        "ImageVersionRow", foreign_keys=[image_version_id]
     )
 
 

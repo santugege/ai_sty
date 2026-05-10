@@ -22,6 +22,12 @@ def test_agent_session_columns():
     } <= set(AgentSessionRow.__table__.columns.keys())
 
 
+def test_agent_session_summary_columns():
+    assert {"summary", "summary_updated_at"} <= set(
+        AgentSessionRow.__table__.columns.keys()
+    )
+
+
 def test_image_version_columns():
     assert {"parent_version_id", "storage_key", "prompt", "model"} <= set(
         ImageVersionRow.__table__.columns.keys()
@@ -30,6 +36,11 @@ def test_image_version_columns():
 
 def test_agent_message_session_relationship_targets_agent_session():
     assert AgentMessageRow.session.property.mapper.class_ is AgentSessionRow
+
+
+def test_agent_message_can_reference_image_version():
+    assert "image_version_id" in AgentMessageRow.__table__.columns.keys()
+    assert AgentMessageRow.image_version.property.mapper.class_ is ImageVersionRow
 
 
 def test_alembic_config_uses_repo_root_script_location():
