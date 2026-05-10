@@ -100,14 +100,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins(),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, error: HTTPException):
-    return JSONResponse({"error": error.detail}, status_code=error.status_code)
+    return JSONResponse(
+        {"error": error.detail},
+        status_code=error.status_code,
+        headers=error.headers,
+    )
 
 
 def build_conversation_service() -> ChatGptConversationService:

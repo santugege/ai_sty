@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RegisterRequest(BaseModel):
@@ -15,6 +15,8 @@ class LoginRequest(BaseModel):
 
 
 class AdminUserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: str | None = None
     username: str | None = None
     isActive: bool | None = None
