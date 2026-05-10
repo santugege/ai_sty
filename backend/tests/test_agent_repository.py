@@ -1,9 +1,11 @@
 import inspect
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.agent_models import ImageVersionRow
 from app.agent_repository import AgentRepository
 from app.db import Base
 
@@ -88,6 +90,41 @@ def test_restore_version_updates_only_current_version():
     assert state is not None
     assert state.session.current_version_id == first.id
     assert [version.id for version in state.versions] == [first.id, second.id]
+
+
+def test_versions_are_returned_in_parent_chain_order_when_timestamps_match():
+    repo = make_repo()
+    session = repo.create_session("Stable ordering")
+    first_id = uuid.UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    second_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    same_time = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    first = ImageVersionRow(
+        id=first_id,
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="images/session-1/v1.png",
+        mime_type="image/png",
+        prompt="first prompt",
+        model="gpt-image-2",
+        created_at=same_time,
+    )
+    second = ImageVersionRow(
+        id=second_id,
+        session_id=session.id,
+        parent_version_id=first.id,
+        storage_key="images/session-1/v2.png",
+        mime_type="image/png",
+        prompt="second prompt",
+        model="gpt-image-2",
+        created_at=same_time,
+    )
+    repo.db.add_all([first, second])
+    repo.db.commit()
+
+    state = repo.get_session_state(session.id)
+
+    assert state is not None
+    assert [version.id for version in state.versions] == [first_id, second_id]
 
 
 def test_restore_version_rejects_version_from_another_session():

@@ -147,7 +147,11 @@ class AgentRepository:
             )
         )
 
-        return AgentSessionState(session=session, messages=messages, versions=versions)
+        return AgentSessionState(
+            session=session,
+            messages=messages,
+            versions=_order_versions_by_parent_chain(versions),
+        )
 
     def _get_session_version(
         self, session_id: uuid.UUID, version_id: uuid.UUID
@@ -158,3 +162,30 @@ class AgentRepository:
                 ImageVersionRow.session_id == session_id,
             )
         )
+
+
+def _order_versions_by_parent_chain(
+    versions: list[ImageVersionRow],
+) -> list[ImageVersionRow]:
+    children_by_parent: dict[uuid.UUID | None, list[ImageVersionRow]] = {}
+    version_ids = {version.id for version in versions}
+    for version in versions:
+        parent_id = (
+            version.parent_version_id
+            if version.parent_version_id in version_ids
+            else None
+        )
+        children_by_parent.setdefault(parent_id, []).append(version)
+
+    for siblings in children_by_parent.values():
+        siblings.sort(key=lambda item: (item.created_at, str(item.id)))
+
+    ordered: list[ImageVersionRow] = []
+
+    def append_branch(parent_id: uuid.UUID | None) -> None:
+        for child in children_by_parent.get(parent_id, []):
+            ordered.append(child)
+            append_branch(child.id)
+
+    append_branch(None)
+    return ordered
