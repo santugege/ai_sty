@@ -2,21 +2,29 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import {
   AlertCircle,
   ImagePlus,
   Loader2,
   Plus,
-  RefreshCcw,
   Send,
   X,
 } from "lucide-react";
 import {
-  resetConversation,
-  sendConversationMessage,
+  createAgentSession,
+  getAgentSession,
+  listAgentSessions,
+  sendAgentSessionMessage,
   type AgentEnvelope,
   type ConversationImage,
+  type ConversationListItem,
   type ConversationMessage,
 } from "@/lib/agent-api";
 
@@ -35,8 +43,15 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function revokeSelectedImages(images: SelectedImage[]) {
+  images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+}
+
 export function AgentImageWorkbench() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sessions, setSessions] = useState<ConversationListItem[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [currentImage, setCurrentImage] = useState<ConversationImage | null>(
@@ -54,6 +69,45 @@ export function AgentImageWorkbench() {
     setMessages(envelope.messages);
     setCurrentImage(envelope.currentImage ?? null);
   }
+
+  async function refreshSessions(nextActiveId?: string) {
+    const envelope = await listAgentSessions();
+    setSessions(envelope.sessions);
+    const resolvedActiveId = nextActiveId ?? envelope.sessions[0]?.id ?? null;
+    setActiveSessionId(resolvedActiveId);
+    if (resolvedActiveId) {
+      applyEnvelope(await getAgentSession(resolvedActiveId));
+    }
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+    listAgentSessions()
+      .then(async (envelope) => {
+        if (!isMounted) {
+          return;
+        }
+        setSessions(envelope.sessions);
+        const firstSession = envelope.sessions[0];
+        if (firstSession) {
+          setActiveSessionId(firstSession.id);
+          applyEnvelope(await getAgentSession(firstSession.id));
+        }
+      })
+      .catch((caught) => {
+        if (isMounted) {
+          setError(caught instanceof Error ? caught.message : "加载会话失败。");
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingSessions(false);
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function handleImages(files: FileList | null) {
     const nextImages = Array.from(files ?? []).map((file) => ({
@@ -77,6 +131,29 @@ export function AgentImageWorkbench() {
     });
   }
 
+  async function handleSelectSession(sessionId: string) {
+    setError("");
+    setActiveSessionId(sessionId);
+    setIsSubmitting(true);
+    try {
+      applyEnvelope(await getAgentSession(sessionId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "加载会话失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleNewSession() {
+    revokeSelectedImages(selectedImages);
+    setActiveSessionId(null);
+    setMessages([]);
+    setCurrentImage(null);
+    setSelectedImages([]);
+    setMessage("");
+    setError("");
+  }
+
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (!canSubmit) {
@@ -92,29 +169,40 @@ export function AgentImageWorkbench() {
     setIsSubmitting(true);
 
     try {
-      const envelope = await sendConversationMessage(formData);
-      selectedImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+      const envelope = activeSessionId
+        ? await sendAgentSessionMessage(activeSessionId, formData)
+        : await createAgentSession(formData);
+      revokeSelectedImages(selectedImages);
       setSelectedImages([]);
       setMessage("");
       applyEnvelope(envelope);
+      setActiveSessionId(envelope.conversation.id);
+      try {
+        await refreshSessions(envelope.conversation.id);
+      } catch (refreshError) {
+        setSessions((previous) =>
+          previous.some((session) => session.id === envelope.conversation.id)
+            ? previous
+            : [
+                {
+                  id: envelope.conversation.id,
+                  title: envelope.conversation.title,
+                  summary: envelope.conversation.summary,
+                  status: envelope.conversation.status,
+                  createdAt: envelope.conversation.createdAt,
+                  updatedAt: envelope.conversation.updatedAt,
+                },
+                ...previous,
+              ],
+        );
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "刷新会话列表失败。",
+        );
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Agent 请求失败。");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleReset() {
-    setError("");
-    setIsSubmitting(true);
-    selectedImages.forEach((image) => URL.revokeObjectURL(image.previewUrl));
-    setSelectedImages([]);
-    setMessage("");
-
-    try {
-      applyEnvelope(await resetConversation());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "重置对话失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -129,15 +217,56 @@ export function AgentImageWorkbench() {
 
   return (
     <main className="min-h-screen bg-[#f7f7f4] text-[#171717]">
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-4 sm:px-6">
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-[#deded8]">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">ChatGPT 对话</p>
-            <p className="truncate text-xs text-[#6f6f68]">
-              单会话内存上下文，支持图片上传与连续编辑
-            </p>
+      <div className="grid min-h-screen lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="border-b border-[#deded8] bg-white px-3 py-4 lg:border-b-0 lg:border-r">
+          <button
+            type="button"
+            onClick={handleNewSession}
+            className="mb-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-[#d2d2cc] text-sm font-medium transition hover:border-[#171717] disabled:opacity-50"
+            disabled={isSubmitting}
+          >
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            新会话
+          </button>
+          <div className="grid gap-1">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => void handleSelectSession(session.id)}
+                className={`rounded-md px-3 py-2 text-left text-sm transition ${
+                  activeSessionId === session.id
+                    ? "bg-[#ededdf]"
+                    : "hover:bg-[#f3f3ed]"
+                }`}
+              >
+                <span className="block truncate font-medium">
+                  {session.title}
+                </span>
+                {session.summary && (
+                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#6f6f68]">
+                    {session.summary}
+                  </span>
+                )}
+              </button>
+            ))}
+            {isLoadingSessions && (
+              <p className="px-3 py-4 text-sm text-[#6f6f68]">加载会话中...</p>
+            )}
+            {!isLoadingSessions && sessions.length === 0 && (
+              <p className="px-3 py-4 text-sm text-[#6f6f68]">暂无会话</p>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+        </aside>
+
+        <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-4 sm:px-6">
+          <header className="flex min-h-12 items-center justify-between gap-3 border-b border-[#deded8]">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">ChatGPT 对话</p>
+              <p className="truncate text-xs text-[#6f6f68]">
+                多会话持久上下文，支持图片上传与连续编辑
+              </p>
+            </div>
             <label className="text-xs text-[#6f6f68]">
               <span className="sr-only">输出尺寸</span>
               <select
@@ -155,135 +284,129 @@ export function AgentImageWorkbench() {
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              onClick={handleReset}
-              disabled={isSubmitting}
-              title="重置当前对话"
-              className="grid h-9 w-9 place-items-center rounded-md border border-[#d2d2cc] bg-white text-[#454540] transition hover:border-[#171717] disabled:opacity-50"
+          </header>
+
+          <section className="flex min-h-0 flex-1 flex-col">
+            <div className="flex-1 overflow-y-auto py-6">
+              {messages.length ? (
+                <div className="grid gap-6">
+                  {messages.map((item) => (
+                    <MessageBubble key={item.id} message={item} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyConversation currentImage={currentImage} />
+              )}
+            </div>
+
+            {currentImage && (
+              <section className="mb-3 overflow-hidden rounded-lg border border-[#d2d2cc] bg-white">
+                <div className="flex items-center justify-between px-3 py-2 text-xs text-[#6f6f68]">
+                  <span>当前图片上下文</span>
+                  <span>{currentImage.model}</span>
+                </div>
+                <div className="max-h-56 overflow-hidden bg-[#ededdf]">
+                  <img
+                    src={currentImage.src}
+                    alt="当前图片上下文"
+                    className="mx-auto max-h-56 w-auto object-contain"
+                  />
+                </div>
+              </section>
+            )}
+
+            {error && (
+              <div className="mb-3 flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                <AlertCircle
+                  aria-hidden="true"
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <p>{error}</p>
+              </div>
+            )}
+
+            <form
+              onSubmit={handleSubmit}
+              className="mb-3 rounded-2xl border border-[#d2d2cc] bg-white p-2 shadow-[0_18px_50px_rgba(25,25,20,0.08)]"
             >
-              <RefreshCcw aria-hidden="true" className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
-
-        <section className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto py-6">
-            {messages.length ? (
-              <div className="grid gap-6">
-                {messages.map((item) => (
-                  <MessageBubble key={item.id} message={item} />
-                ))}
-              </div>
-            ) : (
-              <EmptyConversation currentImage={currentImage} />
-            )}
-          </div>
-
-          {currentImage && (
-            <section className="mb-3 overflow-hidden rounded-lg border border-[#d2d2cc] bg-white">
-              <div className="flex items-center justify-between px-3 py-2 text-xs text-[#6f6f68]">
-                <span>当前图片上下文</span>
-                <span>{currentImage.model}</span>
-              </div>
-              <div className="max-h-56 overflow-hidden bg-[#ededdf]">
-                <img
-                  src={currentImage.src}
-                  alt="当前图片上下文"
-                  className="mx-auto max-h-56 w-auto object-contain"
-                />
-              </div>
-            </section>
-          )}
-
-          {error && (
-            <div className="mb-3 flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              <AlertCircle
-                aria-hidden="true"
-                className="mt-0.5 h-4 w-4 shrink-0"
-              />
-              <p>{error}</p>
-            </div>
-          )}
-
-          <form
-            onSubmit={handleSubmit}
-            className="mb-3 rounded-2xl border border-[#d2d2cc] bg-white p-2 shadow-[0_18px_50px_rgba(25,25,20,0.08)]"
-          >
-            {selectedImages.length > 0 && (
-              <div className="mb-2 flex gap-2 overflow-x-auto px-1 pt-1">
-                {selectedImages.map((image) => (
-                  <div
-                    key={image.id}
-                    className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-[#d2d2cc] bg-[#f3f3ed]"
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.file.name}
-                      className="h-full w-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSelectedImage(image.id)}
-                      title="移除图片"
-                      className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white"
+              {selectedImages.length > 0 && (
+                <div className="mb-2 flex gap-2 overflow-x-auto px-1 pt-1">
+                  {selectedImages.map((image) => (
+                    <div
+                      key={image.id}
+                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-[#d2d2cc] bg-[#f3f3ed]"
                     >
-                      <X aria-hidden="true" className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                      <img
+                        src={image.previewUrl}
+                        alt={image.file.name}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedImage(image.id)}
+                        title="移除图片"
+                        className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white"
+                      >
+                        <X aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              rows={3}
-              disabled={isSubmitting}
-              placeholder="询问或描述要怎么编辑图片"
-              className="max-h-40 min-h-16 w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#171717] outline-none placeholder:text-[#8a8a82]"
-            />
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                rows={3}
+                disabled={isSubmitting}
+                placeholder="询问或描述要怎么编辑图片"
+                className="max-h-40 min-h-16 w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#171717] outline-none placeholder:text-[#8a8a82]"
+              />
 
-            <div className="flex items-center justify-between gap-3 px-1">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  multiple
-                  disabled={isSubmitting}
-                  onChange={(event) => handleImages(event.target.files)}
-                  className="sr-only"
-                />
+              <div className="flex items-center justify-between gap-3 px-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    disabled={isSubmitting}
+                    onChange={(event) => handleImages(event.target.files)}
+                    className="sr-only"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isSubmitting}
+                    title="上传图片"
+                    className="grid h-9 w-9 place-items-center rounded-full border border-[#d2d2cc] text-[#454540] transition hover:border-[#171717] disabled:opacity-50"
+                  >
+                    <Plus aria-hidden="true" className="h-4 w-4" />
+                  </button>
+                  <span className="text-xs text-[#7d7d75]">
+                    PNG / JPG / WebP，图片会随本轮消息发送
+                  </span>
+                </div>
                 <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isSubmitting}
-                  title="上传图片"
-                  className="grid h-9 w-9 place-items-center rounded-full border border-[#d2d2cc] text-[#454540] transition hover:border-[#171717] disabled:opacity-50"
+                  type="submit"
+                  disabled={!canSubmit}
+                  title="发送"
+                  className="grid h-9 w-9 place-items-center rounded-full bg-[#171717] text-white transition hover:bg-[#0f8d7b] disabled:bg-[#c9c9c1] disabled:text-[#77776f]"
                 >
-                  <Plus aria-hidden="true" className="h-4 w-4" />
+                  {isSubmitting ? (
+                    <Loader2
+                      aria-hidden="true"
+                      className="h-4 w-4 animate-spin"
+                    />
+                  ) : (
+                    <Send aria-hidden="true" className="h-4 w-4" />
+                  )}
                 </button>
-                <span className="text-xs text-[#7d7d75]">
-                  PNG / JPG / WebP，图片会随本轮消息发送
-                </span>
               </div>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                title="发送"
-                className="grid h-9 w-9 place-items-center rounded-full bg-[#171717] text-white transition hover:bg-[#0f8d7b] disabled:bg-[#c9c9c1] disabled:text-[#77776f]"
-              >
-                {isSubmitting ? (
-                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send aria-hidden="true" className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-          </form>
-        </section>
+            </form>
+          </section>
+        </div>
       </div>
     </main>
   );
@@ -303,7 +426,7 @@ function EmptyConversation({
         今天要编辑哪张图片？
       </h1>
       <p className="mt-3 max-w-md text-sm leading-6 text-[#6f6f68]">
-        像 ChatGPT 一样直接上传图片并输入需求；后续追问会沿用当前图片上下文。
+        像 ChatGPT 一样直接上传图片并输入需求；每个会话都会保存上下文和摘要。
       </p>
       {currentImage && <span className="sr-only">已有当前图片上下文</span>}
     </div>

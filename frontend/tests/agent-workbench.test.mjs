@@ -101,15 +101,29 @@ test("agent api client encodes session ids in persisted routes", async (t) => {
   ]);
 });
 
+test("agent workbench renders session list and sends to active session", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /listAgentSessions/);
+  assert.match(source, /getAgentSession/);
+  assert.match(source, /createAgentSession/);
+  assert.match(source, /sendAgentSessionMessage/);
+  assert.match(source, /sessions\.map/);
+  assert.match(source, /activeSessionId/);
+  assert.match(source, /New conversation|新会话/);
+});
+
 test("agent workbench renders a ChatGPT-style conversation composer", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
-  assert.match(source, /sendConversationMessage/);
-  assert.match(source, /resetConversation/);
+  assert.match(source, /sendAgentSessionMessage/);
+  assert.match(source, /createAgentSession/);
   assert.match(source, /messages\.map/);
   assert.match(source, /selectedImages/);
   assert.match(source, /textarea/);
   assert.match(source, /ChatGPT/);
+  assert.doesNotMatch(source, /sendConversationMessage/);
+  assert.doesNotMatch(source, /resetConversation/);
   assert.doesNotMatch(source, /versions\.map/);
   assert.doesNotMatch(source, /restoreAgentVersion/);
   assert.doesNotMatch(source, /handleRestore/);
