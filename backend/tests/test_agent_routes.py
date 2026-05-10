@@ -140,6 +140,50 @@ def test_build_agent_service_wires_persistent_dependencies(monkeypatch):
     assert summary_calls[0]["previous_summary"] == "old"
 
 
+def test_build_agent_service_defaults_to_gpt_5_4_mini_agent_model(monkeypatch):
+    turn_calls = []
+    summary_calls = []
+
+    class FakeRepo:
+        def __init__(self, session):
+            self.session = session
+
+    monkeypatch.setattr(app_main, "AgentRepository", FakeRepo, raising=False)
+    monkeypatch.setattr(
+        app_main,
+        "GptImage2EditTool",
+        lambda image_client, image_model: object(),
+    )
+    monkeypatch.setattr(app_main, "build_image_storage", lambda: object(), raising=False)
+    monkeypatch.setattr(app_main, "create_openai_image_client", lambda **kwargs: object())
+    monkeypatch.setattr(
+        app_main,
+        "request_conversation_turn",
+        lambda **kwargs: turn_calls.append(kwargs) or "turn",
+    )
+    monkeypatch.setattr(
+        app_main,
+        "request_conversation_summary",
+        lambda **kwargs: summary_calls.append(kwargs) or "summary",
+        raising=False,
+    )
+    monkeypatch.delenv("OPENAI_AGENT_MODEL", raising=False)
+
+    service = app_main.build_agent_service(object())
+
+    assert service.planner(
+        user_message="hello",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        summary=None,
+    ) == "turn"
+    assert service.summarizer(previous_summary=None, recent_messages=[]) == "summary"
+    assert turn_calls[0]["agent_model"] == "gpt-5.4-mini"
+    assert summary_calls[0]["agent_model"] == "gpt-5.4-mini"
+
+
 def test_create_session_route_accepts_message_size_and_multiple_images(monkeypatch):
     db = object()
     build_calls = []

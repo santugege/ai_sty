@@ -126,7 +126,7 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
 
     api_key = os.getenv("OPENAI_API_KEY") or ""
     image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
-    agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.5")
+    agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini")
     base_url = openai_base_url()
     image_client = create_openai_image_client(
         api_key=api_key,
