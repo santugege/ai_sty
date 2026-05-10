@@ -111,14 +111,20 @@ def request_conversation_summary(
             },
             {
                 "role": "user",
-                "content": {
-                    "previous_summary": previous_summary or "",
-                    "recent_messages": recent_messages,
-                },
+                "content": json.dumps(
+                    {
+                        "previous_summary": previous_summary or "",
+                        "recent_messages": recent_messages,
+                    },
+                    ensure_ascii=False,
+                ),
             },
         ],
     )
-    return str(response.output_text).strip()
+    summary = _response_output_text(response).strip()
+    if not summary:
+        raise RuntimeError("Agent summary response was empty.")
+    return summary
 
 
 def parse_conversation_turn_response(response: Any) -> ConversationTurnDecision:

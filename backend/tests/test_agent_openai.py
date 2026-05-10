@@ -1,11 +1,12 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
-from app.agent_openai import request_agent_decision
+from app.agent_openai import request_agent_decision, request_conversation_summary
 
 
-def test_request_conversation_summary_returns_output_text():
+def test_request_conversation_summary_sends_json_content_and_returns_output_text():
     calls = []
 
     class FakeResponse:
@@ -20,12 +21,10 @@ def test_request_conversation_summary_returns_output_text():
         def __init__(self, **kwargs):
             self.responses = FakeResponses()
 
-    from app.agent_openai import request_conversation_summary
-
     summary = request_conversation_summary(
         api_key="sk-test",
         agent_model="gpt-5.4-mini",
-        previous_summary=None,
+        previous_summary="User prefers clean backgrounds.",
         recent_messages=[
             {"role": "user", "content": "Make it brighter."},
             {"role": "assistant", "content": "Done."},
@@ -35,6 +34,53 @@ def test_request_conversation_summary_returns_output_text():
 
     assert summary == "User wants a bright product image with clean background."
     assert calls[0]["model"] == "gpt-5.4-mini"
+    content = calls[0]["input"][1]["content"]
+    assert isinstance(content, str)
+    payload = json.loads(content)
+    assert payload["previous_summary"] == "User prefers clean backgrounds."
+    assert payload["recent_messages"] == [
+        {"role": "user", "content": "Make it brighter."},
+        {"role": "assistant", "content": "Done."},
+    ]
+
+
+def test_request_conversation_summary_accepts_raw_string_response():
+    class FakeResponses:
+        def create(self, **kwargs):
+            return "  User wants a brighter image with a clean background.  "
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    summary = request_conversation_summary(
+        api_key="sk-test",
+        agent_model="gpt-5.4-mini",
+        previous_summary=None,
+        recent_messages=[],
+        client_factory=FakeClient,
+    )
+
+    assert summary == "User wants a brighter image with a clean background."
+
+
+def test_request_conversation_summary_raises_for_empty_output():
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(output_text="   ")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    with pytest.raises(RuntimeError, match="Agent summary response was empty."):
+        request_conversation_summary(
+            api_key="sk-test",
+            agent_model="gpt-5.4-mini",
+            previous_summary=None,
+            recent_messages=[],
+            client_factory=FakeClient,
+        )
 
 
 def test_request_agent_decision_returns_edit_decision_from_gpt_5_5():
