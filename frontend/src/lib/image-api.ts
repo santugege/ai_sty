@@ -9,6 +9,7 @@ export type GeneratedImage = {
 type ImageGenerationPayload = {
   image?: GeneratedImage;
   error?: string;
+  detail?: string;
 };
 
 const apiBaseUrl =
@@ -28,12 +29,13 @@ export async function submitImageGenerationForm(
 ): Promise<GeneratedImage> {
   const response = await fetch(`${apiBaseUrl}/api/images/generate`, {
     method: "POST",
+    credentials: "include",
     body: formData,
   });
   const payload = await readImageGenerationPayload(response);
 
   if (!response.ok || !payload.image) {
-    throw new Error(payload.error || genericErrorMessage);
+    throw new Error(payload.error || payload.detail || genericErrorMessage);
   }
 
   return payload.image;

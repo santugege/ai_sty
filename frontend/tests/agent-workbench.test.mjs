@@ -78,7 +78,11 @@ test("agent api client encodes session ids in persisted routes", async (t) => {
     globalThis.fetch = originalFetch;
   });
   globalThis.fetch = async (url, init) => {
-    calls.push({ url: String(url), method: init?.method });
+    calls.push({
+      url: String(url),
+      method: init?.method,
+      credentials: init?.credentials,
+    });
     return new Response(JSON.stringify(successEnvelope), {
       headers: { "content-type": "application/json" },
       status: 200,
@@ -93,10 +97,12 @@ test("agent api client encodes session ids in persisted routes", async (t) => {
     {
       url: "http://localhost:8000/api/agent/sessions/session%2Fwith%20spaces",
       method: "GET",
+      credentials: "include",
     },
     {
       url: "http://localhost:8000/api/agent/sessions/session%2Fwith%20spaces/messages",
       method: "POST",
+      credentials: "include",
     },
   ]);
 });

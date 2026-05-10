@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { IBM_Plex_Mono, Noto_Sans_SC, Noto_Serif_SC } from "next/font/google";
+import { AuthProvider } from "@/components/auth-provider";
 import "./globals.css";
 
 const sans = Noto_Sans_SC({
@@ -34,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
       <body className="font-sans antialiased min-h-screen bg-paper text-ink">
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
