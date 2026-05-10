@@ -29,3 +29,12 @@ def test_backend_dependencies_include_minio_storage_stack():
     assert "MINIO_BUCKET=" in env_example
     assert "MINIO_ACCESS_KEY=" in env_example
     assert "MINIO_SECRET_KEY=" in env_example
+
+
+def test_docker_compose_defines_postgres_and_minio():
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "postgres:" in compose
+    assert "minio:" in compose
+    assert "9000:9000" in compose
+    assert "5432:5432" in compose
