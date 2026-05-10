@@ -26,6 +26,7 @@ export type ConversationMessage = {
   content: string;
   attachments: ConversationAttachment[];
   responseId?: string | null;
+  imageVersionId?: string | null;
   image?: ConversationImage | null;
   createdAt: string;
 };
@@ -74,8 +75,9 @@ export async function createAgentSession(formData: FormData) {
 }
 
 export async function getAgentSession(sessionId: string) {
+  const encodedSessionId = encodeURIComponent(sessionId);
   return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/sessions/${sessionId}`, {
+    await fetch(`${apiBaseUrl}/api/agent/sessions/${encodedSessionId}`, {
       method: "GET",
     }),
   );
@@ -85,8 +87,9 @@ export async function sendAgentSessionMessage(
   sessionId: string,
   formData: FormData,
 ) {
+  const encodedSessionId = encodeURIComponent(sessionId);
   return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/sessions/${sessionId}/messages`, {
+    await fetch(`${apiBaseUrl}/api/agent/sessions/${encodedSessionId}/messages`, {
       method: "POST",
       body: formData,
     }),
@@ -115,8 +118,8 @@ async function readAgentResponse(response: Response): Promise<AgentEnvelope> {
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & { error?: string };
-  if (!response.ok || "error" in payload) {
+  const payload = (await response.json()) as T & { error?: string | null };
+  if (!response.ok || payload.error) {
     throw new Error(payload.error || "Agent request failed.");
   }
   return payload;

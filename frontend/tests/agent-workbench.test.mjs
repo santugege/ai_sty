@@ -1,6 +1,46 @@
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
+import ts from "typescript";
+
+async function importAgentApiClient() {
+  const source = readFileSync("src/lib/agent-api.ts", "utf8");
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  });
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}#${Date.now()}-${Math.random()}`;
+
+  return import(moduleUrl);
+}
+
+const successEnvelope = {
+  conversation: {
+    id: "session-1",
+    title: "Session one",
+    summary: null,
+    previousResponseId: null,
+    status: "ready",
+    createdAt: "2026-05-10T00:00:00Z",
+    updatedAt: "2026-05-10T00:00:00Z",
+  },
+  messages: [
+    {
+      id: "message-1",
+      role: "assistant",
+      content: "Ready",
+      attachments: [],
+      responseId: null,
+      imageVersionId: "version-1",
+      image: null,
+      createdAt: "2026-05-10T00:00:00Z",
+    },
+  ],
+  currentImage: null,
+  error: null,
+};
 
 test("agent api client uses persisted session routes", () => {
   const source = readFileSync("src/lib/agent-api.ts", "utf8");
@@ -10,6 +50,55 @@ test("agent api client uses persisted session routes", () => {
   assert.match(source, /getAgentSession/);
   assert.match(source, /sendAgentSessionMessage/);
   assert.match(source, /\/api\/agent\/sessions/);
+  assert.match(source, /imageVersionId\?: string \| null/);
+});
+
+test("agent api client accepts successful envelopes with null errors", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(successEnvelope), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
+
+  const { createAgentSession } = await importAgentApiClient();
+  const envelope = await createAgentSession(new FormData());
+
+  assert.equal(envelope.error, null);
+  assert.equal(envelope.messages[0].imageVersionId, "version-1");
+});
+
+test("agent api client encodes session ids in persisted routes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method });
+    return new Response(JSON.stringify(successEnvelope), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
+  };
+
+  const { getAgentSession, sendAgentSessionMessage } = await importAgentApiClient();
+  await getAgentSession("session/with spaces");
+  await sendAgentSessionMessage("session/with spaces", new FormData());
+
+  assert.deepEqual(calls, [
+    {
+      url: "http://localhost:8000/api/agent/sessions/session%2Fwith%20spaces",
+      method: "GET",
+    },
+    {
+      url: "http://localhost:8000/api/agent/sessions/session%2Fwith%20spaces/messages",
+      method: "POST",
+    },
+  ]);
 });
 
 test("agent workbench renders a ChatGPT-style conversation composer", () => {
