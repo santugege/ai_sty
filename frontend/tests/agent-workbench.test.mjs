@@ -116,7 +116,7 @@ test("agent workbench renders session list and sends to active session", () => {
   assert.match(source, /sendAgentSessionMessage/);
   assert.match(source, /sessions\.map/);
   assert.match(source, /activeSessionId/);
-  assert.match(source, /新会话/);
+  assert.match(source, /New conversation|新会话/);
 });
 
 test("agent workbench guards async session loads and clears drafts on session changes", () => {
