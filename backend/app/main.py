@@ -20,10 +20,10 @@ from app.agent_service import (
 )
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
 from app.config import load_backend_env, openai_base_url
-from app.db import get_db_session
 
 load_backend_env()
 
+from app.db import get_db_session
 from app.image_storage import MinioImageStorage
 from app.image_request import (
     MAX_IMAGE_BYTES,
@@ -256,9 +256,7 @@ async def reset_conversation():
 @app.get("/api/agent/sessions")
 async def list_agent_sessions(db: Session = Depends(get_db_session)):
     try:
-        envelope = await run_in_threadpool(
-            lambda: build_agent_service(db).list_sessions()
-        )
+        envelope = build_agent_service(db).list_sessions()
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
@@ -273,12 +271,10 @@ async def create_agent_session(
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        envelope = await run_in_threadpool(
-            lambda: build_agent_service(db).create_session(
-                message=message,
-                attachments=attachments,
-                size=size,
-            )
+        envelope = build_agent_service(db).create_session(
+            message=message,
+            attachments=attachments,
+            size=size,
         )
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
@@ -291,9 +287,7 @@ async def get_agent_session(
     db: Session = Depends(get_db_session),
 ):
     try:
-        envelope = await run_in_threadpool(
-            lambda: build_agent_service(db).get_session(session_id)
-        )
+        envelope = build_agent_service(db).get_session(session_id)
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
@@ -309,13 +303,11 @@ async def send_agent_session_message(
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        envelope = await run_in_threadpool(
-            lambda: build_agent_service(db).send_session_message(
-                session_id,
-                message=message,
-                attachments=attachments,
-                size=size,
-            )
+        envelope = build_agent_service(db).send_session_message(
+            session_id,
+            message=message,
+            attachments=attachments,
+            size=size,
         )
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:

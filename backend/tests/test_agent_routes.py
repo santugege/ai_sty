@@ -1,5 +1,6 @@
 import base64
 import uuid
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -32,6 +33,21 @@ def override_db_session(db):
         yield db
 
     app.dependency_overrides[get_db_session] = override
+
+
+def forbid_threadpool(monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("session routes should not use run_in_threadpool")
+
+    monkeypatch.setattr(app_main, "run_in_threadpool", fail_if_called, raising=False)
+
+
+def test_main_loads_backend_env_before_importing_db_session():
+    source = Path("backend/app/main.py").read_text(encoding="utf-8")
+
+    assert source.index("load_backend_env()") < source.index(
+        "from app.db import get_db_session"
+    )
 
 
 def test_build_image_storage_uses_minio_defaults(monkeypatch):
@@ -205,6 +221,7 @@ def test_create_session_route_accepts_message_size_and_multiple_images(monkeypat
         return FakeService()
 
     override_db_session(db)
+    forbid_threadpool(monkeypatch)
     monkeypatch.setattr(app_main, "build_agent_service", build_service, raising=False)
     try:
         response = client.post(
@@ -258,6 +275,7 @@ def test_list_sessions_route_returns_service_json(monkeypatch):
         return FakeService()
 
     override_db_session(db)
+    forbid_threadpool(monkeypatch)
     monkeypatch.setattr(app_main, "build_agent_service", build_service, raising=False)
     try:
         response = client.get("/api/agent/sessions")
@@ -284,6 +302,7 @@ def test_get_session_route_passes_uuid_to_service(monkeypatch):
             return FakeEnvelope()
 
     override_db_session(db)
+    forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
         app_main, "build_agent_service", lambda session: FakeService(), raising=False
     )
@@ -319,6 +338,7 @@ def test_session_message_route_passes_uuid_message_size_and_images(monkeypatch):
             return FakeEnvelope()
 
     override_db_session(db)
+    forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
         app_main, "build_agent_service", lambda session: FakeService(), raising=False
     )
@@ -357,6 +377,7 @@ def test_session_route_uses_agent_error_response(monkeypatch):
             raise AgentInputError("bad session input")
 
     override_db_session(db)
+    forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
         app_main, "build_agent_service", lambda session: FakeService(), raising=False
     )
