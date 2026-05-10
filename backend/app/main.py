@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import logging
 import os
+from uuid import UUID
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.agent_openai import request_conversation_turn
+from app.agent_openai import request_conversation_summary, request_conversation_turn
+from app.agent_repository import AgentRepository
 from app.agent_service import (
     AgentInputError,
     AgentServiceError,
@@ -17,9 +20,11 @@ from app.agent_service import (
 )
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
 from app.config import load_backend_env, openai_base_url
+from app.db import get_db_session
 
 load_backend_env()
 
+from app.image_storage import MinioImageStorage
 from app.image_request import (
     MAX_IMAGE_BYTES,
     SUPPORTED_IMAGE_TYPES,
@@ -101,6 +106,62 @@ def build_conversation_service() -> ChatGptConversationService:
         {"gpt_image_2_edit": GptImage2EditTool(image_client=image_client, image_model=image_model)},
     )
     return conversation_service
+
+
+def build_image_storage() -> MinioImageStorage:
+    endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
+    public_endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT", endpoint)
+    return MinioImageStorage(
+        bucket=os.getenv("MINIO_BUCKET", "agent-images"),
+        endpoint_url=endpoint,
+        access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+        secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+        public_endpoint=public_endpoint,
+    )
+
+
+def build_agent_service(db: Session | None = None) -> ChatGptConversationService:
+    if db is None:
+        return build_conversation_service()
+
+    api_key = os.getenv("OPENAI_API_KEY") or ""
+    image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+    agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.5")
+    base_url = openai_base_url()
+    image_client = create_openai_image_client(
+        api_key=api_key,
+        image_model=image_model,
+        base_url=base_url,
+    )
+
+    def planner(**kwargs):
+        return request_conversation_turn(
+            api_key=api_key,
+            agent_model=agent_model,
+            base_url=base_url,
+            **kwargs,
+        )
+
+    def summarizer(**kwargs):
+        return request_conversation_summary(
+            api_key=api_key,
+            agent_model=agent_model,
+            base_url=base_url,
+            **kwargs,
+        )
+
+    return ChatGptConversationService(
+        planner=planner,
+        tools={
+            "gpt_image_2_edit": GptImage2EditTool(
+                image_client=image_client,
+                image_model=image_model,
+            )
+        },
+        repo=AgentRepository(db),
+        storage=build_image_storage(),
+        summarizer=summarizer,
+    )
 
 
 def agent_error_response(error: Exception) -> JSONResponse:
@@ -186,6 +247,75 @@ async def reset_conversation():
         envelope = await run_in_threadpool(
             run_agent_service,
             "reset",
+        )
+        return envelope.model_dump(mode="json")
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
+@app.get("/api/agent/sessions")
+async def list_agent_sessions(db: Session = Depends(get_db_session)):
+    try:
+        envelope = await run_in_threadpool(
+            lambda: build_agent_service(db).list_sessions()
+        )
+        return envelope.model_dump(mode="json")
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
+@app.post("/api/agent/sessions")
+async def create_agent_session(
+    message: str = Form(""),
+    size: str = Form("1536x1024"),
+    images: list[UploadFile] | None = File(None),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        attachments = await read_conversation_uploads(images)
+        envelope = await run_in_threadpool(
+            lambda: build_agent_service(db).create_session(
+                message=message,
+                attachments=attachments,
+                size=size,
+            )
+        )
+        return envelope.model_dump(mode="json")
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
+@app.get("/api/agent/sessions/{session_id}")
+async def get_agent_session(
+    session_id: UUID,
+    db: Session = Depends(get_db_session),
+):
+    try:
+        envelope = await run_in_threadpool(
+            lambda: build_agent_service(db).get_session(session_id)
+        )
+        return envelope.model_dump(mode="json")
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
+@app.post("/api/agent/sessions/{session_id}/messages")
+async def send_agent_session_message(
+    session_id: UUID,
+    message: str = Form(""),
+    size: str = Form("1536x1024"),
+    images: list[UploadFile] | None = File(None),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        attachments = await read_conversation_uploads(images)
+        envelope = await run_in_threadpool(
+            lambda: build_agent_service(db).send_session_message(
+                session_id,
+                message=message,
+                attachments=attachments,
+                size=size,
+            )
         )
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
