@@ -1,13 +1,21 @@
 from pathlib import Path
 
-from app.agent_models import AgentMessageRow, AgentSessionRow, ImageVersionRow
+from app.agent_models import (
+    AgentMessageImageVersionRow,
+    AgentMessageRow,
+    AgentSessionRow,
+    ImageVersionRow,
+)
 from app.db import Base
 
 
 def test_base_metadata_includes_agent_tables():
-    assert {"agent_sessions", "agent_messages", "image_versions"} <= set(
-        Base.metadata.tables
-    )
+    assert {
+        "agent_sessions",
+        "agent_messages",
+        "agent_message_image_versions",
+        "image_versions",
+    } <= set(Base.metadata.tables)
 
 
 def test_agent_session_columns():
@@ -41,6 +49,20 @@ def test_agent_message_session_relationship_targets_agent_session():
 def test_agent_message_can_reference_image_version():
     assert "image_version_id" in AgentMessageRow.__table__.columns.keys()
     assert AgentMessageRow.image_version.property.mapper.class_ is ImageVersionRow
+
+
+def test_agent_message_image_version_association_columns_and_relationships():
+    assert {"message_id", "image_version_id", "position"} <= set(
+        AgentMessageImageVersionRow.__table__.columns.keys()
+    )
+    assert (
+        AgentMessageImageVersionRow.message.property.mapper.class_
+        is AgentMessageRow
+    )
+    assert (
+        AgentMessageImageVersionRow.image_version.property.mapper.class_
+        is ImageVersionRow
+    )
 
 
 def test_alembic_config_uses_repo_root_script_location():

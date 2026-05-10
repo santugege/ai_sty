@@ -1,11 +1,11 @@
-import inspect
 import uuid
 from datetime import datetime, timezone
+import inspect
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.agent_models import AgentSessionRow, ImageVersionRow
+from app.agent_models import AgentMessageImageVersionRow, AgentSessionRow, ImageVersionRow
 from app.agent_repository import AgentRepository
 from app.db import Base
 
@@ -109,6 +109,74 @@ def test_add_message_can_link_generated_image_version():
     assert state is not None
     assert state.messages == [message]
     assert state.messages[0].image_version_id == version.id
+
+
+def test_add_message_can_link_multiple_image_versions_in_order():
+    repo = make_repo()
+    session = repo.create_session("Multi upload")
+    first = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/session/first.png",
+        mime_type="image/png",
+        prompt="first",
+        model="user-upload",
+    )
+    second = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=first.id,
+        storage_key="agent-sessions/session/second.png",
+        mime_type="image/png",
+        prompt="second",
+        model="user-upload",
+    )
+
+    message = repo.add_message(
+        session_id=session.id,
+        role="user",
+        content="Use these.",
+        image_version_ids=[first.id, second.id],
+    )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == [message]
+    assert state.messages[0].image_version_id == second.id
+    assert state.message_image_versions[message.id] == [first.id, second.id]
+
+
+def test_add_message_ignores_cross_session_image_versions_for_multi_links():
+    repo = make_repo()
+    first_session = repo.create_session("First session")
+    second_session = repo.create_session("Second session")
+    first = repo.add_image_version(
+        session_id=first_session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/session/first.png",
+        mime_type="image/png",
+        prompt="first",
+        model="user-upload",
+    )
+    other = repo.add_image_version(
+        session_id=second_session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/other/other.png",
+        mime_type="image/png",
+        prompt="other",
+        model="user-upload",
+    )
+
+    message = repo.add_message(
+        session_id=first_session.id,
+        role="user",
+        content="Use these.",
+        image_version_ids=[first.id, other.id],
+    )
+
+    state = repo.get_session_state(first_session.id)
+    assert state is not None
+    assert state.messages[0].image_version_id == first.id
+    assert state.message_image_versions[message.id] == [first.id]
 
 
 def test_add_message_rejects_cross_session_image_version_link():
@@ -333,7 +401,7 @@ def test_remove_turn_artifacts_deletes_messages_and_versions_and_restores_curren
         session_id=session.id,
         role="user",
         content="Bad turn",
-        image_version_id=transient.id,
+        image_version_ids=[transient.id],
     )
 
     repo.remove_turn_artifacts(
@@ -348,6 +416,46 @@ def test_remove_turn_artifacts_deletes_messages_and_versions_and_restores_curren
     assert state.session.current_version_id == original.id
     assert [item.id for item in state.messages] == []
     assert [item.id for item in state.versions] == [original.id]
+    assert repo.db.query(AgentMessageImageVersionRow).count() == 0
+
+
+def test_remove_turn_artifacts_restores_session_response_and_summary_state():
+    repo = make_repo()
+    session = repo.create_session("Rollback state")
+    original_summary_time = datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc)
+    repo.set_previous_response_id(session.id, "resp_original")
+    repo.update_session_summary(session.id, "Original summary")
+    session.summary_updated_at = original_summary_time
+    repo.db.commit()
+    original_state = repo.get_session_state(session.id)
+    assert original_state is not None
+    original_summary_updated_at = original_state.session.summary_updated_at
+
+    message = repo.add_message(
+        session_id=session.id,
+        role="assistant",
+        content="Transient",
+        response_id="resp_new",
+    )
+    repo.set_previous_response_id(session.id, "resp_new")
+    repo.update_session_summary(session.id, "Transient summary")
+
+    repo.remove_turn_artifacts(
+        session_id=session.id,
+        message_ids=[message.id],
+        version_ids=[],
+        restored_current_version_id=None,
+        restored_previous_response_id="resp_original",
+        restored_summary="Original summary",
+        restored_summary_updated_at=original_summary_updated_at,
+    )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == []
+    assert state.session.previous_response_id == "resp_original"
+    assert state.session.summary == "Original summary"
+    assert state.session.summary_updated_at == original_summary_updated_at
 
 
 def test_set_previous_response_id_persists_and_can_be_cleared():

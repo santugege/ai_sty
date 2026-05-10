@@ -7,7 +7,12 @@ from datetime import timezone, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agent_models import AgentMessageRow, AgentSessionRow, ImageVersionRow
+from app.agent_models import (
+    AgentMessageImageVersionRow,
+    AgentMessageRow,
+    AgentSessionRow,
+    ImageVersionRow,
+)
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,7 @@ class AgentSessionState:
     session: AgentSessionRow
     messages: list[AgentMessageRow]
     versions: list[ImageVersionRow]
+    message_image_versions: dict[uuid.UUID, list[uuid.UUID]]
 
 
 class AgentRepository:
@@ -36,11 +42,15 @@ class AgentRepository:
         response_id: str | None = None,
         tool_call_id: str | None = None,
         image_version_id: uuid.UUID | None = None,
+        image_version_ids: list[uuid.UUID] | None = None,
     ) -> AgentMessageRow:
-        linked_version_id = None
-        if image_version_id is not None:
-            version = self._get_session_version(session_id, image_version_id)
-            linked_version_id = version.id if version is not None else None
+        linked_version_ids = self._valid_session_version_ids(
+            session_id,
+            image_version_ids
+            if image_version_ids is not None
+            else ([image_version_id] if image_version_id is not None else []),
+        )
+        linked_version_id = linked_version_ids[-1] if linked_version_ids else None
 
         row = AgentMessageRow(
             session_id=session_id,
@@ -53,6 +63,17 @@ class AgentRepository:
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
+        for position, version_id in enumerate(linked_version_ids):
+            self.db.add(
+                AgentMessageImageVersionRow(
+                    message_id=row.id,
+                    image_version_id=version_id,
+                    position=position,
+                )
+            )
+        if linked_version_ids:
+            self.db.commit()
+            self.db.refresh(row)
         return row
 
     def list_sessions(self) -> list[AgentSessionRow]:
@@ -165,6 +186,9 @@ class AgentRepository:
         message_ids: list[uuid.UUID],
         version_ids: list[uuid.UUID],
         restored_current_version_id: uuid.UUID | None,
+        restored_previous_response_id: str | None = None,
+        restored_summary: str | None = None,
+        restored_summary_updated_at: datetime | None = None,
     ) -> None:
         session = self.db.get(AgentSessionRow, session_id)
         if session is None:
@@ -175,11 +199,21 @@ class AgentRepository:
             session.current_version_id = restored.id if restored is not None else None
         else:
             session.current_version_id = None
+        session.previous_response_id = restored_previous_response_id
+        session.summary = restored_summary
+        session.summary_updated_at = restored_summary_updated_at
 
         if message_ids:
+            self.db.query(AgentMessageImageVersionRow).filter(
+                AgentMessageImageVersionRow.message_id.in_(message_ids),
+            ).delete(synchronize_session=False)
             self.db.query(AgentMessageRow).filter(
                 AgentMessageRow.session_id == session_id,
                 AgentMessageRow.id.in_(message_ids),
+            ).delete(synchronize_session=False)
+        if version_ids:
+            self.db.query(AgentMessageImageVersionRow).filter(
+                AgentMessageImageVersionRow.image_version_id.in_(version_ids),
             ).delete(synchronize_session=False)
         if version_ids:
             self.db.query(ImageVersionRow).filter(
@@ -193,6 +227,28 @@ class AgentRepository:
         if session is None:
             return
 
+        message_ids = list(
+            self.db.scalars(
+                select(AgentMessageRow.id).where(
+                    AgentMessageRow.session_id == session_id
+                )
+            )
+        )
+        version_ids = list(
+            self.db.scalars(
+                select(ImageVersionRow.id).where(
+                    ImageVersionRow.session_id == session_id
+                )
+            )
+        )
+        if message_ids:
+            self.db.query(AgentMessageImageVersionRow).filter(
+                AgentMessageImageVersionRow.message_id.in_(message_ids),
+            ).delete(synchronize_session=False)
+        if version_ids:
+            self.db.query(AgentMessageImageVersionRow).filter(
+                AgentMessageImageVersionRow.image_version_id.in_(version_ids),
+            ).delete(synchronize_session=False)
         self.db.query(AgentMessageRow).filter(
             AgentMessageRow.session_id == session_id
         ).delete(synchronize_session=False)
@@ -221,11 +277,35 @@ class AgentRepository:
                 .order_by(ImageVersionRow.created_at, ImageVersionRow.id)
             )
         )
+        message_image_versions = {
+            message.id: []
+            for message in messages
+        }
+        if messages:
+            links = list(
+                self.db.scalars(
+                    select(AgentMessageImageVersionRow)
+                    .where(
+                        AgentMessageImageVersionRow.message_id.in_(
+                            [message.id for message in messages]
+                        )
+                    )
+                    .order_by(
+                        AgentMessageImageVersionRow.message_id,
+                        AgentMessageImageVersionRow.position,
+                    )
+                )
+            )
+            for link in links:
+                message_image_versions.setdefault(link.message_id, []).append(
+                    link.image_version_id
+                )
 
         return AgentSessionState(
             session=session,
             messages=messages,
             versions=_order_versions_by_parent_chain(versions),
+            message_image_versions=message_image_versions,
         )
 
     def _get_session_version(
@@ -237,6 +317,16 @@ class AgentRepository:
                 ImageVersionRow.session_id == session_id,
             )
         )
+
+    def _valid_session_version_ids(
+        self, session_id: uuid.UUID, version_ids: list[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        valid = []
+        for version_id in version_ids:
+            version = self._get_session_version(session_id, version_id)
+            if version is not None:
+                valid.append(version.id)
+        return valid
 
 
 def _order_versions_by_parent_chain(

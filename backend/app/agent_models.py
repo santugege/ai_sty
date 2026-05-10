@@ -68,6 +68,30 @@ class AgentMessageRow(Base):
     image_version: Mapped[ImageVersionRow | None] = relationship(
         "ImageVersionRow", foreign_keys=[image_version_id]
     )
+    image_version_links: Mapped[list["AgentMessageImageVersionRow"]] = relationship(
+        "AgentMessageImageVersionRow",
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )
+
+
+class AgentMessageImageVersionRow(Base):
+    __tablename__ = "agent_message_image_versions"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("agent_messages.id"), primary_key=True
+    )
+    image_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("image_versions.id"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    message: Mapped[AgentMessageRow] = relationship(
+        "AgentMessageRow", back_populates="image_version_links"
+    )
+    image_version: Mapped["ImageVersionRow"] = relationship(
+        "ImageVersionRow", foreign_keys=[image_version_id]
+    )
 
 
 class ImageVersionRow(Base):

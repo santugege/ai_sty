@@ -208,8 +208,14 @@ class ChatGptConversationService:
     ) -> AgentEnvelope:
         if self.repo is None:
             return self._send_in_memory_message(message, attachments, size)
+        if not message.strip() and not attachments:
+            raise ConversationInputError("Please enter a message or upload an image.")
         session = self.repo.create_session(_title_from_message(message))
-        return self._send_persistent_message(session.id, message, attachments, size)
+        try:
+            return self._send_persistent_message(session.id, message, attachments, size)
+        except Exception:
+            self.repo.delete_session(session.id)
+            raise
 
     def send_session_message(
         self,
@@ -258,6 +264,9 @@ class ChatGptConversationService:
         state = self._get_persistent_state(session_id)
         parsed_session_id = state.session.id
         restored_current_version_id = state.session.current_version_id
+        restored_previous_response_id = state.session.previous_response_id
+        restored_summary = state.session.summary
+        restored_summary_updated_at = state.session.summary_updated_at
         parent_version = _current_version(state)
         uploaded_versions: list[ImageVersionRow] = []
         persisted_message_ids: list[uuid.UUID] = []
@@ -292,7 +301,7 @@ class ChatGptConversationService:
                 parsed_session_id,
                 role="user",
                 content=normalized_message,
-                image_version_id=linked_user_version_id,
+                image_version_ids=[version.id for version in uploaded_versions],
             )
             persisted_message_ids.append(user_message.id)
             if state.messages:
@@ -377,6 +386,9 @@ class ChatGptConversationService:
                 version_ids=persisted_version_ids,
                 storage_keys=persisted_storage_keys,
                 restored_current_version_id=restored_current_version_id,
+                restored_previous_response_id=restored_previous_response_id,
+                restored_summary=restored_summary,
+                restored_summary_updated_at=restored_summary_updated_at,
             )
             raise
 
@@ -464,6 +476,9 @@ class ChatGptConversationService:
         version_ids: list[uuid.UUID],
         storage_keys: list[str],
         restored_current_version_id: uuid.UUID | None,
+        restored_previous_response_id: str | None,
+        restored_summary: str | None,
+        restored_summary_updated_at: datetime | None,
     ) -> None:
         if self.repo is not None:
             try:
@@ -472,6 +487,9 @@ class ChatGptConversationService:
                     message_ids=message_ids,
                     version_ids=version_ids,
                     restored_current_version_id=restored_current_version_id,
+                    restored_previous_response_id=restored_previous_response_id,
+                    restored_summary=restored_summary,
+                    restored_summary_updated_at=restored_summary_updated_at,
                 )
             except Exception:
                 pass
@@ -538,6 +556,14 @@ class ChatGptConversationService:
                     content=message.content,
                     attachments=self._version_attachment_dtos(
                         message,
+                        [
+                            versions_by_id[version_id]
+                            for version_id in state.message_image_versions.get(
+                                message.id,
+                                [],
+                            )
+                            if version_id in versions_by_id
+                        ],
                         versions_by_id.get(message.image_version_id),
                     ),
                     responseId=message.response_id,
@@ -559,21 +585,31 @@ class ChatGptConversationService:
         )
 
     def _version_attachment_dtos(
-        self, message: AgentMessageRow, version: ImageVersionRow | None
+        self,
+        message: AgentMessageRow,
+        linked_versions: list[ImageVersionRow],
+        fallback_version: ImageVersionRow | None,
     ) -> list[ConversationAttachmentDto]:
-        if message.role != "user" or version is None or version.model != "user-upload":
+        if message.role != "user":
             return []
         if self.storage is None:
             raise AgentServiceError("Persistent agent service is not configured.")
-        image_bytes = self.storage.read_image(version.storage_key)
+        versions = linked_versions
+        if not versions and fallback_version is not None:
+            versions = [fallback_version]
         return [
             ConversationAttachmentDto(
                 id=str(version.id),
                 name="Uploaded image",
                 mimeType=version.mime_type,
-                src=_data_url(image_bytes, version.mime_type),
+                src=_data_url(
+                    self.storage.read_image(version.storage_key),
+                    version.mime_type,
+                ),
                 createdAt=version.created_at,
             )
+            for version in versions
+            if version.model == "user-upload"
         ]
 
     def _message_image_dto(
