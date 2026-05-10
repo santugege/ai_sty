@@ -75,6 +75,8 @@ def read_session_token(token: str) -> str | None:
         payload = json.loads(_b64decode(body).decode("utf-8"))
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None
+    if not isinstance(payload, dict):
+        return None
 
     try:
         expires_at = int(payload.get("exp", 0))

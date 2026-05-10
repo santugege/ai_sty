@@ -65,6 +65,14 @@ def test_signed_malformed_session_payload_returns_none(monkeypatch):
     assert read_session_token(f"{body}.{signature}") is None
 
 
+def test_signed_non_object_session_payload_returns_none(monkeypatch):
+    monkeypatch.setenv("SESSION_SECRET", "test-secret")
+    body = _b64encode(json.dumps([]).encode("utf-8"))
+    signature = _signature("test-secret", body)
+
+    assert read_session_token(f"{body}.{signature}") is None
+
+
 def test_session_token_requires_configured_secret(monkeypatch):
     monkeypatch.delenv("SESSION_SECRET", raising=False)
 
