@@ -1,4 +1,7 @@
 from pathlib import Path
+import subprocess
+import sys
+from configparser import ConfigParser
 
 from app.db import Base
 from app.user_models import UserRow
@@ -98,3 +101,27 @@ def test_single_admin_migration_exists():
     assert 'op.drop_index("ix_users_single_admin", table_name="users")' in migration
     assert "roles" not in migration
     assert "permissions" not in migration
+
+
+def test_alembic_config_supports_root_invocation():
+    config = ConfigParser()
+    config.read("backend/alembic.ini", encoding="utf-8")
+
+    assert config["alembic"]["prepend_sys_path"] == "backend"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "backend/alembic.ini",
+            "heads",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "20260510_0005" in result.stdout
