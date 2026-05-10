@@ -9,3 +9,4 @@ httpx
 sqlalchemy
 psycopg[binary]
 alembic
+boto3
