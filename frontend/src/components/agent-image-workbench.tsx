@@ -49,6 +49,9 @@ function revokeSelectedImages(images: SelectedImage[]) {
 
 export function AgentImageWorkbench() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const requestSequenceRef = useRef(0);
+  const isMountedRef = useRef(false);
+  const selectedImagesRef = useRef<SelectedImage[]>([]);
   const [sessions, setSessions] = useState<ConversationListItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
@@ -65,48 +68,83 @@ export function AgentImageWorkbench() {
   const canSubmit =
     !isSubmitting && (message.trim().length > 0 || selectedImages.length > 0);
 
+  function beginRequest() {
+    requestSequenceRef.current += 1;
+    return requestSequenceRef.current;
+  }
+
+  function isCurrentRequest(requestId: number) {
+    return isMountedRef.current && requestSequenceRef.current === requestId;
+  }
+
   function applyEnvelope(envelope: AgentEnvelope) {
     setMessages(envelope.messages);
     setCurrentImage(envelope.currentImage ?? null);
   }
 
-  async function refreshSessions(nextActiveId?: string) {
+  function clearDraft(images: SelectedImage[] = selectedImages) {
+    revokeSelectedImages(images);
+    selectedImagesRef.current = [];
+    setSelectedImages([]);
+    setMessage("");
+  }
+
+  async function refreshSessions(nextActiveId?: string, requestId?: number) {
     const envelope = await listAgentSessions();
+    if (requestId !== undefined && !isCurrentRequest(requestId)) {
+      return;
+    }
     setSessions(envelope.sessions);
     const resolvedActiveId = nextActiveId ?? envelope.sessions[0]?.id ?? null;
     setActiveSessionId(resolvedActiveId);
     if (resolvedActiveId) {
-      applyEnvelope(await getAgentSession(resolvedActiveId));
+      const sessionEnvelope = await getAgentSession(resolvedActiveId);
+      if (requestId === undefined || isCurrentRequest(requestId)) {
+        applyEnvelope(sessionEnvelope);
+      }
     }
   }
 
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
+    const requestId = beginRequest();
     listAgentSessions()
       .then(async (envelope) => {
-        if (!isMounted) {
+        if (!isCurrentRequest(requestId)) {
           return;
         }
         setSessions(envelope.sessions);
         const firstSession = envelope.sessions[0];
         if (firstSession) {
           setActiveSessionId(firstSession.id);
-          applyEnvelope(await getAgentSession(firstSession.id));
+          const sessionEnvelope = await getAgentSession(firstSession.id);
+          if (isCurrentRequest(requestId)) {
+            applyEnvelope(sessionEnvelope);
+          }
         }
       })
       .catch((caught) => {
-        if (isMounted) {
+        if (isCurrentRequest(requestId)) {
           setError(caught instanceof Error ? caught.message : "加载会话失败。");
         }
       })
       .finally(() => {
-        if (isMounted) {
+        if (isCurrentRequest(requestId)) {
           setIsLoadingSessions(false);
         }
       });
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
+      requestSequenceRef.current += 1;
     };
+  }, []);
+
+  useEffect(() => {
+    selectedImagesRef.current = selectedImages;
+  }, [selectedImages]);
+
+  useEffect(() => {
+    return () => revokeSelectedImages(selectedImagesRef.current);
   }, []);
 
   function handleImages(files: FileList | null) {
@@ -115,7 +153,14 @@ export function AgentImageWorkbench() {
       file,
       previewUrl: URL.createObjectURL(file),
     }));
-    setSelectedImages((previous) => [...previous, ...nextImages].slice(0, 4));
+    setSelectedImages((previous) => {
+      const allImages = [...previous, ...nextImages];
+      const keptImages = allImages.slice(0, 4);
+      const droppedImages = allImages.slice(4);
+      revokeSelectedImages(droppedImages);
+      selectedImagesRef.current = keptImages;
+      return keptImages;
+    });
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -127,31 +172,43 @@ export function AgentImageWorkbench() {
       if (removed) {
         URL.revokeObjectURL(removed.previewUrl);
       }
-      return previous.filter((image) => image.id !== imageId);
+      const nextImages = previous.filter((image) => image.id !== imageId);
+      selectedImagesRef.current = nextImages;
+      return nextImages;
     });
   }
 
   async function handleSelectSession(sessionId: string) {
+    const requestId = beginRequest();
     setError("");
     setActiveSessionId(sessionId);
+    clearDraft();
     setIsSubmitting(true);
     try {
-      applyEnvelope(await getAgentSession(sessionId));
+      const envelope = await getAgentSession(sessionId);
+      if (isCurrentRequest(requestId)) {
+        applyEnvelope(envelope);
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "加载会话失败。");
+      if (isCurrentRequest(requestId)) {
+        setError(caught instanceof Error ? caught.message : "加载会话失败。");
+      }
     } finally {
-      setIsSubmitting(false);
+      if (isCurrentRequest(requestId)) {
+        setIsSubmitting(false);
+      }
     }
   }
 
   function handleNewSession() {
-    revokeSelectedImages(selectedImages);
+    beginRequest();
+    clearDraft();
     setActiveSessionId(null);
     setMessages([]);
     setCurrentImage(null);
-    setSelectedImages([]);
-    setMessage("");
     setError("");
+    setIsLoadingSessions(false);
+    setIsSubmitting(false);
   }
 
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
@@ -167,19 +224,27 @@ export function AgentImageWorkbench() {
 
     setError("");
     setIsSubmitting(true);
+    const requestId = beginRequest();
 
     try {
       const envelope = activeSessionId
         ? await sendAgentSessionMessage(activeSessionId, formData)
         : await createAgentSession(formData);
+      if (!isCurrentRequest(requestId)) {
+        return;
+      }
       revokeSelectedImages(selectedImages);
+      selectedImagesRef.current = [];
       setSelectedImages([]);
       setMessage("");
       applyEnvelope(envelope);
       setActiveSessionId(envelope.conversation.id);
       try {
-        await refreshSessions(envelope.conversation.id);
+        await refreshSessions(envelope.conversation.id, requestId);
       } catch (refreshError) {
+        if (!isCurrentRequest(requestId)) {
+          return;
+        }
         setSessions((previous) =>
           previous.some((session) => session.id === envelope.conversation.id)
             ? previous
@@ -202,9 +267,13 @@ export function AgentImageWorkbench() {
         );
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Agent 请求失败。");
+      if (isCurrentRequest(requestId)) {
+        setError(caught instanceof Error ? caught.message : "Agent 请求失败。");
+      }
     } finally {
-      setIsSubmitting(false);
+      if (isCurrentRequest(requestId)) {
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -234,10 +303,11 @@ export function AgentImageWorkbench() {
                 key={session.id}
                 type="button"
                 onClick={() => void handleSelectSession(session.id)}
+                disabled={isSubmitting}
                 className={`rounded-md px-3 py-2 text-left text-sm transition ${
                   activeSessionId === session.id
                     ? "bg-[#ededdf]"
-                    : "hover:bg-[#f3f3ed]"
+                    : "hover:bg-[#f3f3ed] disabled:hover:bg-transparent"
                 }`}
               >
                 <span className="block truncate font-medium">
@@ -364,8 +434,8 @@ export function AgentImageWorkbench() {
                 className="max-h-40 min-h-16 w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#171717] outline-none placeholder:text-[#8a8a82]"
               />
 
-              <div className="flex items-center justify-between gap-3 px-1">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -384,7 +454,7 @@ export function AgentImageWorkbench() {
                   >
                     <Plus aria-hidden="true" className="h-4 w-4" />
                   </button>
-                  <span className="text-xs text-[#7d7d75]">
+                  <span className="min-w-0 text-xs leading-5 text-[#7d7d75]">
                     PNG / JPG / WebP，图片会随本轮消息发送
                   </span>
                 </div>

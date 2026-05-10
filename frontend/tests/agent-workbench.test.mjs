@@ -113,6 +113,30 @@ test("agent workbench renders session list and sends to active session", () => {
   assert.match(source, /New conversation|新会话/);
 });
 
+test("agent workbench guards async session loads and clears drafts on session changes", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /requestSequenceRef/);
+  assert.match(source, /beginRequest/);
+  assert.match(source, /isCurrentRequest/);
+  assert.match(source, /isMountedRef/);
+  assert.match(source, /clearDraft/);
+  assert.match(source, /handleSelectSession[\s\S]*clearDraft/);
+  assert.match(source, /handleNewSession[\s\S]*beginRequest/);
+  assert.match(source, /disabled=\{isSubmitting\}[\s\S]*handleSelectSession/);
+});
+
+test("agent workbench revokes discarded previews and keeps composer controls responsive", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /droppedImages/);
+  assert.match(source, /revokeSelectedImages\(droppedImages\)/);
+  assert.match(source, /selectedImagesRef/);
+  assert.match(source, /return \(\) => revokeSelectedImages\(selectedImagesRef\.current\)/);
+  assert.match(source, /flex-wrap/);
+  assert.match(source, /min-w-0/);
+});
+
 test("agent workbench renders a ChatGPT-style conversation composer", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
