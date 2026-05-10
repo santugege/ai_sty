@@ -89,6 +89,38 @@ def request_agent_decision(
     )
 
 
+def request_conversation_summary(
+    api_key: str,
+    agent_model: str,
+    previous_summary: str | None,
+    recent_messages: list[dict[str, str]],
+    base_url: str | None = None,
+    client_factory: type[Any] = OpenAI,
+) -> str:
+    client = client_factory(**openai_client_kwargs(api_key, base_url))
+    response = client.responses.create(
+        model=agent_model,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "Summarize this image editing conversation for future context. "
+                    "Keep stable user preferences, current goal, visual constraints, "
+                    "and unresolved questions. Return only the summary text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": {
+                    "previous_summary": previous_summary or "",
+                    "recent_messages": recent_messages,
+                },
+            },
+        ],
+    )
+    return str(response.output_text).strip()
+
+
 def parse_conversation_turn_response(response: Any) -> ConversationTurnDecision:
     try:
         payload = _loads_response_payload(_response_output_text(response))

@@ -9,10 +9,24 @@ from pydantic import BaseModel
 class ConversationDto(BaseModel):
     id: str
     title: str
+    summary: str | None = None
     previousResponseId: str | None
     status: str
     createdAt: datetime
     updatedAt: datetime
+
+
+class ConversationListItemDto(BaseModel):
+    id: str
+    title: str
+    summary: str | None = None
+    status: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class ConversationListEnvelope(BaseModel):
+    sessions: list[ConversationListItemDto]
 
 
 class ConversationAttachmentDto(BaseModel):
@@ -39,6 +53,7 @@ class ConversationMessageDto(BaseModel):
     content: str
     attachments: list[ConversationAttachmentDto] = []
     responseId: str | None = None
+    imageVersionId: str | None = None
     image: ConversationImageDto | None = None
     createdAt: datetime
 

@@ -5,6 +5,38 @@ import pytest
 from app.agent_openai import request_agent_decision
 
 
+def test_request_conversation_summary_returns_output_text():
+    calls = []
+
+    class FakeResponse:
+        output_text = "User wants a bright product image with clean background."
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return FakeResponse()
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.responses = FakeResponses()
+
+    from app.agent_openai import request_conversation_summary
+
+    summary = request_conversation_summary(
+        api_key="sk-test",
+        agent_model="gpt-5.4-mini",
+        previous_summary=None,
+        recent_messages=[
+            {"role": "user", "content": "Make it brighter."},
+            {"role": "assistant", "content": "Done."},
+        ],
+        client_factory=FakeClient,
+    )
+
+    assert summary == "User wants a bright product image with clean background."
+    assert calls[0]["model"] == "gpt-5.4-mini"
+
+
 def test_request_agent_decision_returns_edit_decision_from_gpt_5_5():
     calls = []
 
