@@ -37,13 +37,18 @@ class AgentRepository:
         tool_call_id: str | None = None,
         image_version_id: uuid.UUID | None = None,
     ) -> AgentMessageRow:
+        linked_version_id = None
+        if image_version_id is not None:
+            version = self._get_session_version(session_id, image_version_id)
+            linked_version_id = version.id if version is not None else None
+
         row = AgentMessageRow(
             session_id=session_id,
             role=role,
             content=content,
             response_id=response_id,
             tool_call_id=tool_call_id,
-            image_version_id=image_version_id,
+            image_version_id=linked_version_id,
         )
         self.db.add(row)
         self.db.commit()
@@ -54,7 +59,9 @@ class AgentRepository:
         return list(
             self.db.scalars(
                 select(AgentSessionRow).order_by(
-                    AgentSessionRow.updated_at.desc(), AgentSessionRow.created_at.desc()
+                    AgentSessionRow.updated_at.desc(),
+                    AgentSessionRow.created_at.desc(),
+                    AgentSessionRow.id.desc(),
                 )
             )
         )

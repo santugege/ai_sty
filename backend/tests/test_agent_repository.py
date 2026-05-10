@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.agent_models import ImageVersionRow
+from app.agent_models import AgentSessionRow, ImageVersionRow
 from app.agent_repository import AgentRepository
 from app.db import Base
 
@@ -27,12 +27,51 @@ def make_repo() -> AgentRepository:
 
 def test_list_sessions_orders_by_recent_update():
     repo = make_repo()
-    first = repo.create_session("First")
-    second = repo.create_session("Second")
+    first_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    second_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    first = AgentSessionRow(
+        id=first_id,
+        title="First",
+        created_at=datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc),
+    )
+    second = AgentSessionRow(
+        id=second_id,
+        title="Second",
+        created_at=datetime(2026, 5, 10, 9, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 10, 9, 0, tzinfo=timezone.utc),
+    )
+    repo.db.add_all([first, second])
+    repo.db.commit()
 
     sessions = repo.list_sessions()
 
     assert [row.id for row in sessions] == [second.id, first.id]
+
+
+def test_list_sessions_uses_id_tiebreaker_when_timestamps_match():
+    repo = make_repo()
+    lower_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    higher_id = uuid.UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    same_time = datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc)
+    lower = AgentSessionRow(
+        id=lower_id,
+        title="Lower",
+        created_at=same_time,
+        updated_at=same_time,
+    )
+    higher = AgentSessionRow(
+        id=higher_id,
+        title="Higher",
+        created_at=same_time,
+        updated_at=same_time,
+    )
+    repo.db.add_all([lower, higher])
+    repo.db.commit()
+
+    sessions = repo.list_sessions()
+
+    assert [row.id for row in sessions] == [higher_id, lower_id]
 
 
 def test_update_session_summary_persists_text_and_timestamp():
@@ -70,6 +109,32 @@ def test_add_message_can_link_generated_image_version():
     assert state is not None
     assert state.messages == [message]
     assert state.messages[0].image_version_id == version.id
+
+
+def test_add_message_rejects_cross_session_image_version_link():
+    repo = make_repo()
+    first_session = repo.create_session("First session")
+    second_session = repo.create_session("Second session")
+    other_version = repo.add_image_version(
+        session_id=second_session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/other/v1.png",
+        mime_type="image/png",
+        prompt="edit",
+        model="gpt-image-2",
+    )
+
+    message = repo.add_message(
+        session_id=first_session.id,
+        role="assistant",
+        content="Done.",
+        image_version_id=other_version.id,
+    )
+
+    state = repo.get_session_state(first_session.id)
+    assert state is not None
+    assert state.messages == [message]
+    assert state.messages[0].image_version_id is None
 
 
 def test_update_session_title_renames_existing_session():
