@@ -85,6 +85,13 @@ def test_single_admin_migration_exists():
 
     assert 'revision = "20260510_0005"' in migration
     assert 'down_revision = "20260510_0004"' in migration
+    assert "op.get_bind()" in migration
+    assert "sa.text(" in migration
+    assert "count(*)" in migration
+    assert "is_admin = true" in migration
+    assert "Cannot add single-admin constraint while multiple admin users exist." in migration
+    assert "deactivate extra admins" in migration
+    assert "RuntimeError" in migration
     assert 'op.create_index("ix_users_single_admin"' in migration
     assert "postgresql_where=sa.text(\"is_admin = true\")" in migration
     assert "sqlite_where=sa.text(\"is_admin = true\")" in migration
