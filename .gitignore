@@ -18,3 +18,9 @@ backend/.mypy_cache/
 backend/.ruff_cache/
 backend/.env
 backend/htmlcov/
+
+# Local development logs and manual smoke-test artifacts
+*.log
+backend/.dev-server*.log
+frontend/.next-dev*.log
+output/manual-chat-test/
