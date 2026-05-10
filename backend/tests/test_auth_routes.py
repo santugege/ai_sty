@@ -302,3 +302,53 @@ def test_admin_password_reset_changes_user_password():
 
     assert reset_response.status_code == 200
     assert login_response.status_code == 200
+
+
+def test_image_generation_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.post(
+            "/api/images/generate",
+            data={"toolId": "product", "prompt": "商品图", "size": "1536x1024"},
+        )
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
+def test_agent_sessions_require_login():
+    client, _ = make_client()
+    try:
+        response = client.get("/api/agent/sessions")
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
+def test_agent_conversation_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.post(
+            "/api/agent/conversation",
+            data={"message": "商品图", "size": "1536x1024"},
+        )
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}
+
+
+def test_agent_conversation_reset_requires_login():
+    client, _ = make_client()
+    try:
+        response = client.post("/api/agent/conversation/reset")
+    finally:
+        cleanup_overrides()
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "请先登录。"}

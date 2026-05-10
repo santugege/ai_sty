@@ -30,7 +30,11 @@ from app.agent_service import (
     ChatGptConversationService,
 )
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
-from app.auth_dependencies import get_optional_current_user, require_admin_user
+from app.auth_dependencies import (
+    get_current_user,
+    get_optional_current_user,
+    require_admin_user,
+)
 from app.auth_schemas import (
     AdminPasswordResetRequest,
     AdminUserUpdateRequest,
@@ -386,6 +390,7 @@ async def send_conversation_message(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
+    current_user: UserRow = Depends(get_current_user),
 ):
     try:
         attachments = await read_conversation_uploads(images)
@@ -402,7 +407,9 @@ async def send_conversation_message(
 
 
 @app.post("/api/agent/conversation/reset")
-async def reset_conversation():
+async def reset_conversation(
+    current_user: UserRow = Depends(get_current_user),
+):
     try:
         envelope = await run_in_threadpool(
             run_agent_service,
@@ -414,7 +421,10 @@ async def reset_conversation():
 
 
 @app.get("/api/agent/sessions")
-async def list_agent_sessions(db: Session = Depends(get_db_session)):
+async def list_agent_sessions(
+    current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
     try:
         envelope = build_agent_service(db).list_sessions()
         return envelope.model_dump(mode="json")
@@ -427,6 +437,7 @@ async def create_agent_session(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -444,6 +455,7 @@ async def create_agent_session(
 @app.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(
     session_id: UUID,
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -459,6 +471,7 @@ async def send_agent_session_message(
     message: str = Form(""),
     size: str = Form("1536x1024"),
     images: list[UploadFile] | None = File(None),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -491,6 +504,7 @@ async def generate_image(
     aspectRatio: str = Form(""),
     imageCount: str = Form(""),
     image: UploadFile | None = File(None),
+    current_user: UserRow = Depends(get_current_user),
 ):
     try:
         api_key = os.getenv("OPENAI_API_KEY")

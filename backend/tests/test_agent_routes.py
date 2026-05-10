@@ -2,13 +2,16 @@ import base64
 import uuid
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as app_main
 from app.agent_service import AgentInputError
+from app.auth_dependencies import get_current_user
 from app.db import get_db_session
 from app.image_request import MAX_IMAGE_BYTES
 from app.main import app
+from app.user_models import UserRow
 
 
 client = TestClient(app)
@@ -33,6 +36,34 @@ def override_db_session(db):
         yield db
 
     app.dependency_overrides[get_db_session] = override
+
+
+def override_current_user():
+    return UserRow(
+        email="tester@example.com",
+        username="tester",
+        password_hash="hash",
+        user_id="U00000001",
+        is_admin=True,
+        is_active=True,
+    )
+
+
+def allow_authenticated_user():
+    app.dependency_overrides[get_current_user] = override_current_user
+
+
+def cleanup_auth_override():
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture
+def authenticated_user():
+    allow_authenticated_user()
+    try:
+        yield
+    finally:
+        cleanup_auth_override()
 
 
 def forbid_threadpool(monkeypatch):
@@ -200,7 +231,9 @@ def test_build_agent_service_defaults_to_gpt_5_4_mini_agent_model(monkeypatch):
     assert summary_calls[0]["agent_model"] == "gpt-5.4-mini"
 
 
-def test_create_session_route_accepts_message_size_and_multiple_images(monkeypatch):
+def test_create_session_route_accepts_message_size_and_multiple_images(
+    monkeypatch, authenticated_user
+):
     db = object()
     build_calls = []
     service_calls = []
@@ -258,7 +291,7 @@ def test_create_session_route_accepts_message_size_and_multiple_images(monkeypat
     ]
 
 
-def test_list_sessions_route_returns_service_json(monkeypatch):
+def test_list_sessions_route_returns_service_json(monkeypatch, authenticated_user):
     db = object()
     build_calls = []
 
@@ -287,7 +320,7 @@ def test_list_sessions_route_returns_service_json(monkeypatch):
     assert build_calls == [db]
 
 
-def test_get_session_route_passes_uuid_to_service(monkeypatch):
+def test_get_session_route_passes_uuid_to_service(monkeypatch, authenticated_user):
     db = object()
     session_id = uuid.uuid4()
     service_calls = []
@@ -316,7 +349,9 @@ def test_get_session_route_passes_uuid_to_service(monkeypatch):
     assert service_calls == [session_id]
 
 
-def test_session_message_route_passes_uuid_message_size_and_images(monkeypatch):
+def test_session_message_route_passes_uuid_message_size_and_images(
+    monkeypatch, authenticated_user
+):
     db = object()
     session_id = uuid.uuid4()
     service_calls = []
@@ -369,7 +404,7 @@ def test_session_message_route_passes_uuid_message_size_and_images(monkeypatch):
     ]
 
 
-def test_session_route_uses_agent_error_response(monkeypatch):
+def test_session_route_uses_agent_error_response(monkeypatch, authenticated_user):
     db = object()
 
     class FakeService:
@@ -393,7 +428,7 @@ def test_session_route_uses_agent_error_response(monkeypatch):
     assert response.json() == {"error": "bad session input"}
 
 
-def test_conversation_accepts_text_and_image_attachment(monkeypatch):
+def test_conversation_accepts_text_and_image_attachment(monkeypatch, authenticated_user):
     class FakeEnvelope:
         def model_dump(self, mode):
             return {"messages": [{"role": "assistant", "content": "ok"}]}
@@ -423,7 +458,9 @@ def test_conversation_accepts_text_and_image_attachment(monkeypatch):
     assert response.json() == {"messages": [{"role": "assistant", "content": "ok"}]}
 
 
-def test_conversation_allows_text_follow_up_without_attachment(monkeypatch):
+def test_conversation_allows_text_follow_up_without_attachment(
+    monkeypatch, authenticated_user
+):
     class FakeEnvelope:
         def model_dump(self, mode):
             return {"ok": True}
@@ -445,7 +482,9 @@ def test_conversation_allows_text_follow_up_without_attachment(monkeypatch):
     assert response.json() == {"ok": True}
 
 
-def test_conversation_rejects_unsupported_image_type_before_service(monkeypatch):
+def test_conversation_rejects_unsupported_image_type_before_service(
+    monkeypatch, authenticated_user
+):
     service_was_built = False
 
     def fail_if_called():
@@ -466,7 +505,9 @@ def test_conversation_rejects_unsupported_image_type_before_service(monkeypatch)
     assert service_was_built is False
 
 
-def test_conversation_rejects_oversized_image_before_service(monkeypatch):
+def test_conversation_rejects_oversized_image_before_service(
+    monkeypatch, authenticated_user
+):
     service_was_built = False
 
     def fail_if_called():
@@ -493,7 +534,9 @@ def test_conversation_rejects_oversized_image_before_service(monkeypatch):
     assert service_was_built is False
 
 
-def test_conversation_unexpected_failure_returns_json_500(monkeypatch):
+def test_conversation_unexpected_failure_returns_json_500(
+    monkeypatch, authenticated_user
+):
     class FakeService:
         def send_message(self, message, attachments, size):
             raise RuntimeError("sk-test stack trace")
@@ -509,7 +552,7 @@ def test_conversation_unexpected_failure_returns_json_500(monkeypatch):
     assert response.json() == {"error": "Agent request failed."}
 
 
-def test_reset_conversation_returns_empty_envelope(monkeypatch):
+def test_reset_conversation_returns_empty_envelope(monkeypatch, authenticated_user):
     class FakeEnvelope:
         def model_dump(self, mode):
             return {"messages": [], "currentImage": None}
