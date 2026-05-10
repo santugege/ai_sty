@@ -61,7 +61,12 @@ class LocalImageStorage:
         self.root = Path(root or os.getenv("IMAGE_STORAGE_DIR", "backend/storage/images"))
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def write_image(self, image_bytes: bytes, mime_type: str = "image/png") -> StoredImage:
+    def write_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        prefix: str | None = None,
+    ) -> StoredImage:
         storage_key = _validate_storage_key(f"{uuid.uuid4()}{extension_for_mime_type(mime_type)}")
         path = self.root / storage_key
         path.write_bytes(image_bytes)

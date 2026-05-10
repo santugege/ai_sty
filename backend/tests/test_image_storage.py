@@ -38,6 +38,21 @@ def test_local_image_storage_writes_and_reads_image(tmp_path):
     assert storage.read_image(stored.storage_key) == b"image"
 
 
+def test_local_image_storage_accepts_prefix_but_keeps_filename_storage_key(tmp_path):
+    storage = LocalImageStorage(tmp_path)
+
+    stored = storage.write_image(
+        b"image",
+        mime_type="image/jpeg",
+        prefix="agent-sessions/session-id",
+    )
+
+    assert stored.storage_key.endswith(".jpg")
+    assert "/" not in stored.storage_key
+    assert "\\" not in stored.storage_key
+    assert (tmp_path / stored.storage_key).read_bytes() == b"image"
+
+
 def test_local_image_storage_rejects_path_traversal(tmp_path):
     storage = LocalImageStorage(tmp_path)
 

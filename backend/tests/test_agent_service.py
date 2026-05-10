@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agent_repository import AgentRepository
 from app.agent_service import (
+    AgentServiceError,
     ChatGptConversationService,
     ConversationInputError,
     ConversationTurnDecision,
@@ -73,6 +74,9 @@ class FakeImageStorage:
 
     def read_image(self, storage_key: str) -> bytes:
         return self.objects[storage_key]
+
+    def delete_image(self, storage_key: str) -> None:
+        self.objects.pop(storage_key, None)
 
 
 def make_repo() -> AgentRepository:
@@ -178,6 +182,31 @@ def test_create_session_persists_conversation_and_uploaded_image():
     assert envelope.messages[0].imageVersionId == str(state.versions[0].id)
 
 
+def test_persistent_user_uploads_are_returned_as_attachments_not_generated_images():
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision("answer", "I can edit this image.", None, None, "resp_1")
+    )
+
+    envelope = service.create_session(
+        message="Use this upload.",
+        attachments=[
+            {
+                "image_bytes": b"input-image",
+                "image_name": "product.png",
+                "mime_type": "image/png",
+            }
+        ],
+        size="1536x1024",
+    )
+
+    user_message = envelope.messages[0]
+    assert user_message.image is None
+    assert len(user_message.attachments) == 1
+    assert user_message.attachments[0].name == "Uploaded image"
+    assert user_message.attachments[0].src.startswith("data:image/png;base64,")
+    assert envelope.messages[1].image is None
+
+
 def test_sessions_keep_separate_previous_response_ids():
     repo = make_repo()
     storage = FakeImageStorage()
@@ -273,6 +302,69 @@ def test_persistent_edit_turn_uses_stored_current_image_and_persists_generated_v
     assert edited.currentImage is not None
     assert edited.currentImage.src.endswith("ZWRpdGVkLWltYWdl")
     assert edited.messages[-1].imageVersionId == str(state.versions[-1].id)
+
+
+def test_failed_persistent_edit_without_current_image_rolls_back_user_message():
+    repo = make_repo()
+    session = repo.create_session("No image")
+    service, _planner_calls, _tool, storage = make_persistent_service(
+        ConversationTurnDecision(
+            "edit",
+            "I need an image.",
+            "gpt_image_2_edit",
+            "Edit it.",
+            "resp_1",
+        ),
+        repo=repo,
+    )
+
+    with pytest.raises(ConversationInputError, match="Please upload an image first."):
+        service.send_session_message(session.id, "Make it brighter.", [], "1536x1024")
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == []
+    assert state.versions == []
+    assert state.session.current_version_id is None
+    assert storage.objects == {}
+
+
+def test_failed_persistent_edit_with_unavailable_tool_rolls_back_upload_side_effects():
+    repo = make_repo()
+    session = repo.create_session("Bad tool")
+    storage = FakeImageStorage()
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            "edit",
+            "I will edit it.",
+            "missing_tool",
+            "Edit it.",
+            "resp_1",
+        ),
+        repo=repo,
+        storage=storage,
+    )
+
+    with pytest.raises(AgentServiceError, match="selected agent tool is not available"):
+        service.send_session_message(
+            session.id,
+            "Use this product photo.",
+            [
+                {
+                    "image_bytes": b"input-image",
+                    "image_name": "product.png",
+                    "mime_type": "image/png",
+                }
+            ],
+            "1536x1024",
+        )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == []
+    assert state.versions == []
+    assert state.session.current_version_id is None
+    assert storage.objects == {}
 
 
 def test_summary_refresh_persists_summarizer_result_with_recent_messages():

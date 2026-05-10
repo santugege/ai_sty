@@ -159,6 +159,35 @@ class AgentRepository:
         session.current_version_id = version.id
         self.db.commit()
 
+    def remove_turn_artifacts(
+        self,
+        session_id: uuid.UUID,
+        message_ids: list[uuid.UUID],
+        version_ids: list[uuid.UUID],
+        restored_current_version_id: uuid.UUID | None,
+    ) -> None:
+        session = self.db.get(AgentSessionRow, session_id)
+        if session is None:
+            return
+
+        if restored_current_version_id is not None:
+            restored = self._get_session_version(session_id, restored_current_version_id)
+            session.current_version_id = restored.id if restored is not None else None
+        else:
+            session.current_version_id = None
+
+        if message_ids:
+            self.db.query(AgentMessageRow).filter(
+                AgentMessageRow.session_id == session_id,
+                AgentMessageRow.id.in_(message_ids),
+            ).delete(synchronize_session=False)
+        if version_ids:
+            self.db.query(ImageVersionRow).filter(
+                ImageVersionRow.session_id == session_id,
+                ImageVersionRow.id.in_(version_ids),
+            ).delete(synchronize_session=False)
+        self.db.commit()
+
     def delete_session(self, session_id: uuid.UUID) -> None:
         session = self.db.get(AgentSessionRow, session_id)
         if session is None:

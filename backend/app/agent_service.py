@@ -257,105 +257,128 @@ class ChatGptConversationService:
 
         state = self._get_persistent_state(session_id)
         parsed_session_id = state.session.id
+        restored_current_version_id = state.session.current_version_id
         parent_version = _current_version(state)
-        uploaded_versions = []
-        for attachment in attachments:
+        uploaded_versions: list[ImageVersionRow] = []
+        persisted_message_ids: list[uuid.UUID] = []
+        persisted_version_ids: list[uuid.UUID] = []
+        persisted_storage_keys: list[str] = []
+        try:
+            for attachment in attachments:
+                stored = self.storage.write_image(
+                    bytes(attachment["image_bytes"]),
+                    mime_type=str(attachment["mime_type"]),
+                    prefix=f"agent-sessions/{parsed_session_id}",
+                )
+                persisted_storage_keys.append(stored.storage_key)
+                version = self.repo.add_image_version(
+                    session_id=parsed_session_id,
+                    parent_version_id=(
+                        parent_version.id if parent_version is not None else None
+                    ),
+                    storage_key=stored.storage_key,
+                    mime_type=stored.mime_type,
+                    prompt=normalized_message or "Uploaded image",
+                    model="user-upload",
+                    public_url=getattr(stored, "public_url", None),
+                )
+                persisted_version_ids.append(version.id)
+                self.repo.set_current_version(parsed_session_id, version.id)
+                parent_version = version
+                uploaded_versions.append(version)
+
+            linked_user_version_id = uploaded_versions[-1].id if uploaded_versions else None
+            user_message = self.repo.add_message(
+                parsed_session_id,
+                role="user",
+                content=normalized_message,
+                image_version_id=linked_user_version_id,
+            )
+            persisted_message_ids.append(user_message.id)
+            if state.messages:
+                self._ensure_message_after(user_message, state.messages[-1])
+
+            state = self._get_persistent_state(parsed_session_id)
+            current_version = _current_version(state)
+            decision = self.planner(
+                user_message=normalized_message,
+                summary=state.session.summary,
+                recent_messages=_recent_message_dicts(state.messages),
+                has_current_image=current_version is not None,
+                uploaded_image_count=len(uploaded_versions),
+                previous_response_id=state.session.previous_response_id,
+            )
+
+            if decision.action in {"answer", "clarify"}:
+                assistant_message = self.repo.add_message(
+                    parsed_session_id,
+                    role="assistant",
+                    content=decision.assistant_message,
+                    response_id=decision.response_id,
+                )
+                persisted_message_ids.append(assistant_message.id)
+                self._ensure_message_after(assistant_message, user_message)
+                self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
+                self._maybe_refresh_summary(parsed_session_id)
+                return self.get_session(parsed_session_id)
+
+            if current_version is None:
+                raise ConversationInputError("Please upload an image first.")
+
+            tool = self.tools.get(decision.tool_name or "")
+            if tool is None:
+                raise AgentServiceError("The selected agent tool is not available.")
+
+            image_bytes = self.storage.read_image(current_version.storage_key)
+            result = self._execute_image_tool(
+                tool,
+                decision,
+                _PersistentImageSource(
+                    image_bytes=image_bytes,
+                    mime_type=current_version.mime_type,
+                    name="current-image.png",
+                ),
+                size,
+            )
             stored = self.storage.write_image(
-                bytes(attachment["image_bytes"]),
-                mime_type=str(attachment["mime_type"]),
+                result.image_bytes,
+                mime_type=result.mime_type,
                 prefix=f"agent-sessions/{parsed_session_id}",
             )
-            version = self.repo.add_image_version(
+            persisted_storage_keys.append(stored.storage_key)
+            generated_version = self.repo.add_image_version(
                 session_id=parsed_session_id,
-                parent_version_id=parent_version.id if parent_version is not None else None,
+                parent_version_id=current_version.id,
                 storage_key=stored.storage_key,
                 mime_type=stored.mime_type,
-                prompt=normalized_message or "Uploaded image",
-                model="user-upload",
+                prompt=result.prompt,
+                model=result.model,
+                revised_prompt=result.revised_prompt,
                 public_url=getattr(stored, "public_url", None),
             )
-            self.repo.set_current_version(parsed_session_id, version.id)
-            parent_version = version
-            uploaded_versions.append(version)
-
-        linked_user_version_id = uploaded_versions[-1].id if uploaded_versions else None
-        user_message = self.repo.add_message(
-            parsed_session_id,
-            role="user",
-            content=normalized_message,
-            image_version_id=linked_user_version_id,
-        )
-        if state.messages:
-            self._ensure_message_after(user_message, state.messages[-1])
-
-        state = self._get_persistent_state(parsed_session_id)
-        current_version = _current_version(state)
-        decision = self.planner(
-            user_message=normalized_message,
-            summary=state.session.summary,
-            recent_messages=_recent_message_dicts(state.messages),
-            has_current_image=current_version is not None,
-            uploaded_image_count=len(uploaded_versions),
-            previous_response_id=state.session.previous_response_id,
-        )
-
-        if decision.action in {"answer", "clarify"}:
+            persisted_version_ids.append(generated_version.id)
+            self.repo.set_current_version(parsed_session_id, generated_version.id)
             assistant_message = self.repo.add_message(
                 parsed_session_id,
                 role="assistant",
                 content=decision.assistant_message,
                 response_id=decision.response_id,
+                image_version_id=generated_version.id,
             )
+            persisted_message_ids.append(assistant_message.id)
             self._ensure_message_after(assistant_message, user_message)
             self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
             self._maybe_refresh_summary(parsed_session_id)
             return self.get_session(parsed_session_id)
-
-        if current_version is None:
-            raise ConversationInputError("Please upload an image first.")
-
-        tool = self.tools.get(decision.tool_name or "")
-        if tool is None:
-            raise AgentServiceError("The selected agent tool is not available.")
-
-        image_bytes = self.storage.read_image(current_version.storage_key)
-        result = self._execute_image_tool(
-            tool,
-            decision,
-            _PersistentImageSource(
-                image_bytes=image_bytes,
-                mime_type=current_version.mime_type,
-                name="current-image.png",
-            ),
-            size,
-        )
-        stored = self.storage.write_image(
-            result.image_bytes,
-            mime_type=result.mime_type,
-            prefix=f"agent-sessions/{parsed_session_id}",
-        )
-        generated_version = self.repo.add_image_version(
-            session_id=parsed_session_id,
-            parent_version_id=current_version.id,
-            storage_key=stored.storage_key,
-            mime_type=stored.mime_type,
-            prompt=result.prompt,
-            model=result.model,
-            revised_prompt=result.revised_prompt,
-            public_url=getattr(stored, "public_url", None),
-        )
-        self.repo.set_current_version(parsed_session_id, generated_version.id)
-        assistant_message = self.repo.add_message(
-            parsed_session_id,
-            role="assistant",
-            content=decision.assistant_message,
-            response_id=decision.response_id,
-            image_version_id=generated_version.id,
-        )
-        self._ensure_message_after(assistant_message, user_message)
-        self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
-        self._maybe_refresh_summary(parsed_session_id)
-        return self.get_session(parsed_session_id)
+        except Exception:
+            self._rollback_persistent_turn(
+                session_id=parsed_session_id,
+                message_ids=persisted_message_ids,
+                version_ids=persisted_version_ids,
+                storage_keys=persisted_storage_keys,
+                restored_current_version_id=restored_current_version_id,
+            )
+            raise
 
     def reset(self) -> AgentEnvelope:
         self.state = ConversationState()
@@ -434,6 +457,33 @@ class ChatGptConversationService:
         message.created_at = previous_message.created_at + timedelta(microseconds=1)
         self.repo.db.commit()
 
+    def _rollback_persistent_turn(
+        self,
+        session_id: uuid.UUID,
+        message_ids: list[uuid.UUID],
+        version_ids: list[uuid.UUID],
+        storage_keys: list[str],
+        restored_current_version_id: uuid.UUID | None,
+    ) -> None:
+        if self.repo is not None:
+            try:
+                self.repo.remove_turn_artifacts(
+                    session_id=session_id,
+                    message_ids=message_ids,
+                    version_ids=version_ids,
+                    restored_current_version_id=restored_current_version_id,
+                )
+            except Exception:
+                pass
+        delete_image = getattr(self.storage, "delete_image", None)
+        if delete_image is None:
+            return
+        for storage_key in reversed(storage_keys):
+            try:
+                delete_image(storage_key)
+            except Exception:
+                pass
+
     def _envelope(self) -> AgentEnvelope:
         return AgentEnvelope(
             conversation=ConversationDto(
@@ -486,15 +536,19 @@ class ChatGptConversationService:
                     id=str(message.id),
                     role=message.role,
                     content=message.content,
-                    attachments=[],
+                    attachments=self._version_attachment_dtos(
+                        message,
+                        versions_by_id.get(message.image_version_id),
+                    ),
                     responseId=message.response_id,
                     imageVersionId=(
                         str(message.image_version_id)
                         if message.image_version_id is not None
                         else None
                     ),
-                    image=self._version_image_dto(
-                        versions_by_id.get(message.image_version_id)
+                    image=self._message_image_dto(
+                        message,
+                        versions_by_id.get(message.image_version_id),
                     ),
                     createdAt=message.created_at,
                 )
@@ -503,6 +557,31 @@ class ChatGptConversationService:
             currentImage=self._version_image_dto(_current_version(state)),
             error=None,
         )
+
+    def _version_attachment_dtos(
+        self, message: AgentMessageRow, version: ImageVersionRow | None
+    ) -> list[ConversationAttachmentDto]:
+        if message.role != "user" or version is None or version.model != "user-upload":
+            return []
+        if self.storage is None:
+            raise AgentServiceError("Persistent agent service is not configured.")
+        image_bytes = self.storage.read_image(version.storage_key)
+        return [
+            ConversationAttachmentDto(
+                id=str(version.id),
+                name="Uploaded image",
+                mimeType=version.mime_type,
+                src=_data_url(image_bytes, version.mime_type),
+                createdAt=version.created_at,
+            )
+        ]
+
+    def _message_image_dto(
+        self, message: AgentMessageRow, version: ImageVersionRow | None
+    ) -> ConversationImageDto | None:
+        if message.role == "user" and version is not None and version.model == "user-upload":
+            return None
+        return self._version_image_dto(version)
 
     def _version_image_dto(
         self, version: ImageVersionRow | None

@@ -29,6 +29,7 @@ def request_conversation_turn(
     has_current_image: bool,
     uploaded_image_count: int,
     previous_response_id: str | None,
+    summary: str | None = None,
     base_url: str | None = None,
     client_factory: type[Any] = OpenAI,
 ) -> ConversationTurnDecision:
@@ -54,6 +55,7 @@ def request_conversation_turn(
                 "content": json.dumps(
                     {
                         "user_message": user_message,
+                        "summary": summary or "",
                         "recent_messages": recent_messages,
                         "has_current_image": has_current_image,
                         "uploaded_image_count": uploaded_image_count,

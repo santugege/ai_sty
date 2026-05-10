@@ -308,6 +308,48 @@ def test_set_current_version_rejects_version_from_another_session():
     assert state.session.current_version_id == first_version.id
 
 
+def test_remove_turn_artifacts_deletes_messages_and_versions_and_restores_current_version():
+    repo = make_repo()
+    session = repo.create_session("Rollback test")
+    original = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="images/session-1/original.png",
+        mime_type="image/png",
+        prompt="original",
+        model="user-upload",
+    )
+    repo.set_current_version(session.id, original.id)
+    transient = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=original.id,
+        storage_key="images/session-1/transient.png",
+        mime_type="image/png",
+        prompt="transient",
+        model="user-upload",
+    )
+    repo.set_current_version(session.id, transient.id)
+    message = repo.add_message(
+        session_id=session.id,
+        role="user",
+        content="Bad turn",
+        image_version_id=transient.id,
+    )
+
+    repo.remove_turn_artifacts(
+        session_id=session.id,
+        message_ids=[message.id],
+        version_ids=[transient.id],
+        restored_current_version_id=original.id,
+    )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.session.current_version_id == original.id
+    assert [item.id for item in state.messages] == []
+    assert [item.id for item in state.versions] == [original.id]
+
+
 def test_set_previous_response_id_persists_and_can_be_cleared():
     repo = make_repo()
     session = repo.create_session("Response continuity")

@@ -3,7 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent_openai import request_agent_decision, request_conversation_summary
+from app.agent_openai import (
+    request_agent_decision,
+    request_conversation_summary,
+    request_conversation_turn,
+)
 
 
 def test_request_conversation_summary_sends_json_content_and_returns_output_text():
@@ -81,6 +85,40 @@ def test_request_conversation_summary_raises_for_empty_output():
             recent_messages=[],
             client_factory=FakeClient,
         )
+
+
+def test_request_conversation_turn_includes_summary_in_model_context():
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                id="resp_123",
+                output_text=(
+                    '{"action":"answer","assistant_message":"I can help.",'
+                    '"tool_name":null,"tool_instruction":null}'
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    request_conversation_turn(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Continue the edit",
+        recent_messages=[{"role": "user", "content": "Make it brighter."}],
+        has_current_image=True,
+        uploaded_image_count=0,
+        previous_response_id="resp_previous",
+        summary="User prefers clean white backgrounds.",
+        client_factory=FakeClient,
+    )
+
+    payload = json.loads(calls[0]["input"][1]["content"])
+    assert payload["summary"] == "User prefers clean white backgrounds."
 
 
 def test_request_agent_decision_returns_edit_decision_from_gpt_5_5():
