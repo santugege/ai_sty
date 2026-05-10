@@ -100,3 +100,37 @@ def test_reset_password_changes_login_password():
     assert service.login("user@example.com", "new-password123").id == user.id
     with pytest.raises(AccountServiceError):
         service.login("user@example.com", "password123")
+
+
+def test_admin_uniqueness_race_retries_registration_as_regular_user():
+    service = make_service()
+    owner = service.register("owner@example.com", "owner", "password123")
+
+    user = service.repository.create_user(
+        email="user@example.com",
+        username="user",
+        password_hash=owner.password_hash,
+        is_admin=True,
+        retry_as_regular_on_admin_conflict=True,
+    )
+
+    assert user.is_admin is False
+    assert user.email == "user@example.com"
+    assert service.login("user@example.com", "password123").id == user.id
+
+
+def test_duplicate_conflict_rolls_back_and_raises_service_error():
+    service = make_service()
+    owner = service.register("owner@example.com", "owner", "password123")
+
+    with pytest.raises(AccountServiceError, match="邮箱已被注册"):
+        service.repository.create_user(
+            email="owner@example.com",
+            username="other",
+            password_hash=owner.password_hash,
+            is_admin=False,
+        )
+
+    user = service.register("user@example.com", "user", "password123")
+
+    assert user.email == "user@example.com"

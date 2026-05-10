@@ -39,6 +39,7 @@ class AccountService:
             username=normalized_username,
             password_hash=hash_password(password),
             is_admin=not self.repository.has_users(),
+            retry_as_regular_on_admin_conflict=True,
         )
 
     def login(self, email: str, password: str) -> UserRow:

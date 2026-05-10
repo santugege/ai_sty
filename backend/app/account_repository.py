@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth_security import generate_user_id
@@ -29,19 +30,33 @@ class AccountRepository:
         username: str,
         password_hash: str,
         is_admin: bool,
+        retry_as_regular_on_admin_conflict: bool = False,
     ) -> UserRow:
-        row = UserRow(
-            user_id=self.next_user_id(),
-            email=email,
-            username=username,
-            password_hash=password_hash,
-            is_admin=is_admin,
-            is_active=True,
-        )
-        self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
-        return row
+        for _ in range(10):
+            row = UserRow(
+                user_id=self.next_user_id(),
+                email=email,
+                username=username,
+                password_hash=password_hash,
+                is_admin=is_admin,
+                is_active=True,
+            )
+            try:
+                self.db.add(row)
+                self.db.commit()
+                self.db.refresh(row)
+                return row
+            except IntegrityError as error:
+                self.db.rollback()
+                conflict = _integrity_conflict(error)
+                if conflict == "admin" and is_admin and retry_as_regular_on_admin_conflict:
+                    is_admin = False
+                    continue
+                if conflict == "user_id":
+                    continue
+                raise _service_error_for_conflict(conflict) from error
+
+        raise RuntimeError("Could not allocate a unique user id.")
 
     def get_by_id(self, user_id: uuid.UUID | str) -> UserRow | None:
         try:
@@ -71,7 +86,36 @@ class AccountRepository:
         )
 
     def save(self, user: UserRow) -> UserRow:
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            self.db.add(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except IntegrityError as error:
+            self.db.rollback()
+            raise _service_error_for_conflict(_integrity_conflict(error)) from error
+
+
+def _integrity_conflict(error: IntegrityError) -> str:
+    message = str(error.orig).lower()
+    if "users.email" in message or "ix_users_email" in message:
+        return "email"
+    if "users.username" in message or "ix_users_username" in message:
+        return "username"
+    if "users.user_id" in message or "ix_users_user_id" in message:
+        return "user_id"
+    if "ix_users_single_admin" in message or "users.is_admin" in message:
+        return "admin"
+    return "unknown"
+
+
+def _service_error_for_conflict(conflict: str) -> Exception:
+    from app.account_service import AccountServiceError
+
+    if conflict == "email":
+        return AccountServiceError("邮箱已被注册")
+    if conflict == "username":
+        return AccountServiceError("用户名已被注册")
+    if conflict == "admin":
+        return AccountServiceError("管理员账号已存在")
+    return AccountServiceError("账号保存失败")

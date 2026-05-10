@@ -30,6 +30,16 @@ def test_user_unique_constraints_are_declared():
     assert columns["username"].unique is True
 
 
+def test_user_model_declares_single_admin_index():
+    indexes = {index.name: index for index in UserRow.__table__.indexes}
+
+    assert "ix_users_single_admin" in indexes
+    assert indexes["ix_users_single_admin"].unique is True
+    assert str(indexes["ix_users_single_admin"].dialect_options["sqlite"]["where"]) == (
+        "is_admin = true"
+    )
+
+
 def test_user_column_nullability_and_defaults_match_account_design():
     columns = UserRow.__table__.columns
 
@@ -64,5 +74,20 @@ def test_users_migration_exists_and_does_not_allow_admin_promotion_fields():
     assert 'op.drop_index("ix_users_email", table_name="users")' in migration
     assert 'op.drop_index("ix_users_user_id", table_name="users")' in migration
     assert 'op.drop_table("users")' in migration
+    assert "roles" not in migration
+    assert "permissions" not in migration
+
+
+def test_single_admin_migration_exists():
+    migration = Path(
+        "backend/alembic/versions/20260510_0005_single_admin.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'revision = "20260510_0005"' in migration
+    assert 'down_revision = "20260510_0004"' in migration
+    assert 'op.create_index("ix_users_single_admin"' in migration
+    assert "postgresql_where=sa.text(\"is_admin = true\")" in migration
+    assert "sqlite_where=sa.text(\"is_admin = true\")" in migration
+    assert 'op.drop_index("ix_users_single_admin", table_name="users")' in migration
     assert "roles" not in migration
     assert "permissions" not in migration

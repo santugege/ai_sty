@@ -76,7 +76,10 @@ def read_session_token(token: str) -> str | None:
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None
 
-    expires_at = int(payload.get("exp", 0))
+    try:
+        expires_at = int(payload.get("exp", 0))
+    except (TypeError, ValueError):
+        return None
     if expires_at <= int(datetime.now(timezone.utc).timestamp()):
         return None
 
@@ -92,7 +95,10 @@ def _bcrypt_password_bytes(password: str) -> bytes:
 
 
 def _session_secret() -> bytes:
-    return os.getenv("SESSION_SECRET", "dev-insecure-session-secret").encode("utf-8")
+    secret = os.getenv("SESSION_SECRET")
+    if not secret:
+        raise RuntimeError("SESSION_SECRET must be set.")
+    return secret.encode("utf-8")
 
 
 def _signature(body: str) -> str:

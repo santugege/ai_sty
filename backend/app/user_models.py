@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Text, Uuid
+from sqlalchemy import Boolean, DateTime, Index, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -15,6 +15,15 @@ def utc_now() -> datetime:
 
 class UserRow(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "ix_users_single_admin",
+            "is_admin",
+            unique=True,
+            postgresql_where=text("is_admin = true"),
+            sqlite_where=text("is_admin = true"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
