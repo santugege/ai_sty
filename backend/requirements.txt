@@ -10,3 +10,4 @@ sqlalchemy
 psycopg[binary]
 alembic
 boto3
+PyYAML
