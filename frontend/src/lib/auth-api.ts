@@ -126,12 +126,28 @@ export async function resetUserPassword(
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & {
-    error?: string | null;
-    detail?: string | null;
-  };
+  const payload = await readJsonPayload<T>(response);
   if (!response.ok || payload.error || payload.detail) {
     throw new Error(payload.error || payload.detail || "Auth request failed.");
   }
   return payload;
+}
+
+async function readJsonPayload<T>(
+  response: Response,
+): Promise<T & { error?: string | null; detail?: string | null }> {
+  const contentType = response.headers.get("content-type")?.toLowerCase();
+
+  if (!contentType?.includes("json")) {
+    return {} as T & { error?: string | null; detail?: string | null };
+  }
+
+  try {
+    return (await response.json()) as T & {
+      error?: string | null;
+      detail?: string | null;
+    };
+  } catch {
+    return {} as T & { error?: string | null; detail?: string | null };
+  }
 }

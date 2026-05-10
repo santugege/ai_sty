@@ -67,6 +67,100 @@ test("auth api returns current user envelopes", async (t) => {
   ]);
 });
 
+test("auth api non-json errors use a stable fallback message", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response("not json", {
+      status: 502,
+      headers: { "content-type": "text/plain" },
+    });
+
+  const { getCurrentUser } = await importTsModule("src/lib/auth-api.ts");
+
+  await assert.rejects(getCurrentUser(), {
+    message: "Auth request failed.",
+  });
+});
+
+test("auth api preserves json detail errors", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ detail: "Session expired." }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+
+  const { getCurrentUser } = await importTsModule("src/lib/auth-api.ts");
+
+  await assert.rejects(getCurrentUser(), {
+    message: "Session expired.",
+  });
+});
+
+test("auth api update user sends only allowed fields", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let requestBody;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (_url, init) => {
+    requestBody = init?.body;
+    return new Response(
+      JSON.stringify({
+        user: {
+          id: "uuid",
+          userId: "U00000001",
+          email: "new@example.com",
+          username: "new-owner",
+          isAdmin: true,
+          isActive: false,
+          createdAt: "2026-05-10T00:00:00Z",
+          updatedAt: "2026-05-10T00:00:00Z",
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const { updateUser } = await importTsModule("src/lib/auth-api.ts");
+  await updateUser("U00000001", {
+    email: "new@example.com",
+    username: "new-owner",
+    isActive: false,
+    isAdmin: false,
+  });
+
+  assert.deepEqual(JSON.parse(requestBody), {
+    email: "new@example.com",
+    username: "new-owner",
+    isActive: false,
+  });
+});
+
+test("agent api non-json errors use a stable fallback message", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    new Response("not json", {
+      status: 502,
+      headers: { "content-type": "text/plain" },
+    });
+
+  const { listAgentSessions } = await importTsModule("src/lib/agent-api.ts");
+
+  await assert.rejects(listAgentSessions(), {
+    message: "Agent request failed.",
+  });
+});
+
 test("existing api clients send cookies and read detail errors", () => {
   const agentSource = readFileSync("src/lib/agent-api.ts", "utf8");
   const imageSource = readFileSync("src/lib/image-api.ts", "utf8");
@@ -85,4 +179,5 @@ test("auth provider protects private routes and leaves login register public", (
   assert.match(source, /\/register/);
   assert.match(source, /router\.replace/);
   assert.match(source, /AuthContext/);
+  assert.match(source, /finally[\s\S]*setUser\(null\)[\s\S]*router\.replace\("\/login"\)/);
 });
