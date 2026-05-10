@@ -6,6 +6,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { loginAccount } from "@/lib/auth-api";
+import { safeNextPath } from "@/lib/safe-next-path";
 
 function LoginForm() {
   const router = useRouter();
@@ -24,7 +25,7 @@ function LoginForm() {
     try {
       await loginAccount({ email, password });
       await refreshUser();
-      router.replace(searchParams.get("next") || "/");
+      router.replace(safeNextPath(searchParams.get("next")));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "登录失败，请稍后重试。");
     } finally {

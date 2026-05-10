@@ -187,6 +187,7 @@ test("login and register pages submit account forms", () => {
   const registerSource = readFileSync("src/app/register/page.tsx", "utf8");
 
   assert.match(loginSource, /loginAccount/);
+  assert.match(loginSource, /safeNextPath/);
   assert.match(loginSource, /邮箱/);
   assert.match(loginSource, /密码/);
   assert.match(loginSource, /router\.replace/);
@@ -198,6 +199,17 @@ test("login and register pages submit account forms", () => {
   assert.match(registerSource, /refreshUser\(\)/);
 });
 
+test("login next redirect is constrained to safe local paths", async () => {
+  const { safeNextPath } = await importTsModule("src/lib/safe-next-path.ts");
+
+  assert.equal(safeNextPath("/admin/accounts"), "/admin/accounts");
+  assert.equal(safeNextPath("/agent?draft=1"), "/agent?draft=1");
+  assert.equal(safeNextPath(null), "/");
+  assert.equal(safeNextPath("https://example.com"), "/");
+  assert.equal(safeNextPath("//example.com/path"), "/");
+  assert.equal(safeNextPath("javascript:alert(1)"), "/");
+});
+
 test("app navigation hides account management from regular users", () => {
   const source = readFileSync("src/components/app-nav.tsx", "utf8");
 
@@ -205,6 +217,9 @@ test("app navigation hides account management from regular users", () => {
   assert.match(source, /\/admin\/accounts/);
   assert.match(source, /账号管理/);
   assert.match(source, /logout/);
+  assert.match(source, /mobileNav/);
+  assert.match(source, /xl:hidden/);
+  assert.match(source, /user\?\.email/);
 });
 
 test("admin accounts page does not provide admin promotion", () => {
@@ -214,6 +229,7 @@ test("admin accounts page does not provide admin promotion", () => {
   assert.match(source, /updateUser/);
   assert.match(source, /resetUserPassword/);
   assert.match(source, /isActive/);
+  assert.match(source, /caption/);
   assert.doesNotMatch(source, /isAdmin: true/);
   assert.doesNotMatch(source, /设置为管理员/);
 });

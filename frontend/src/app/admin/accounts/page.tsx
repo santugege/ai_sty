@@ -167,6 +167,9 @@ export default function AdminAccountsPage() {
 
           <div className="overflow-x-auto rounded-lg border border-border bg-surface shadow-soft">
             <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+              <caption className="sr-only">
+                账号列表，可查看用户状态、启停账号并重置密码。
+              </caption>
               <thead className="bg-surface-soft text-xs uppercase text-ink-light">
                 <tr>
                   <th className="px-4 py-3 font-bold">用户</th>
