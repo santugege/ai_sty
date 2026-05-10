@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import timezone, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +35,7 @@ class AgentRepository:
         content: str,
         response_id: str | None = None,
         tool_call_id: str | None = None,
+        image_version_id: uuid.UUID | None = None,
     ) -> AgentMessageRow:
         row = AgentMessageRow(
             session_id=session_id,
@@ -41,11 +43,48 @@ class AgentRepository:
             content=content,
             response_id=response_id,
             tool_call_id=tool_call_id,
+            image_version_id=image_version_id,
         )
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
         return row
+
+    def list_sessions(self) -> list[AgentSessionRow]:
+        return list(
+            self.db.scalars(
+                select(AgentSessionRow).order_by(
+                    AgentSessionRow.updated_at.desc(), AgentSessionRow.created_at.desc()
+                )
+            )
+        )
+
+    def update_session_summary(self, session_id: uuid.UUID, summary: str) -> None:
+        session = self.db.get(AgentSessionRow, session_id)
+        if session is None:
+            return
+
+        session.summary = summary
+        session.summary_updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+
+    def update_session_title(self, session_id: uuid.UUID, title: str) -> None:
+        session = self.db.get(AgentSessionRow, session_id)
+        if session is None:
+            return
+
+        normalized = title.strip()
+        if normalized:
+            session.title = normalized[:120]
+            self.db.commit()
+
+    def touch_session(self, session_id: uuid.UUID) -> None:
+        session = self.db.get(AgentSessionRow, session_id)
+        if session is None:
+            return
+
+        session.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
 
     def add_image_version(
         self,

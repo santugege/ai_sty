@@ -25,6 +25,64 @@ def make_repo() -> AgentRepository:
     return AgentRepository(session)
 
 
+def test_list_sessions_orders_by_recent_update():
+    repo = make_repo()
+    first = repo.create_session("First")
+    second = repo.create_session("Second")
+
+    sessions = repo.list_sessions()
+
+    assert [row.id for row in sessions] == [second.id, first.id]
+
+
+def test_update_session_summary_persists_text_and_timestamp():
+    repo = make_repo()
+    session = repo.create_session("Summary test")
+
+    repo.update_session_summary(session.id, "User wants a clean product image.")
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.session.summary == "User wants a clean product image."
+    assert state.session.summary_updated_at is not None
+
+
+def test_add_message_can_link_generated_image_version():
+    repo = make_repo()
+    session = repo.create_session("Linked image")
+    version = repo.add_image_version(
+        session_id=session.id,
+        parent_version_id=None,
+        storage_key="agent-sessions/session/v1.png",
+        mime_type="image/png",
+        prompt="edit",
+        model="gpt-image-2",
+    )
+
+    message = repo.add_message(
+        session_id=session.id,
+        role="assistant",
+        content="Done.",
+        image_version_id=version.id,
+    )
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.messages == [message]
+    assert state.messages[0].image_version_id == version.id
+
+
+def test_update_session_title_renames_existing_session():
+    repo = make_repo()
+    session = repo.create_session("Old")
+
+    repo.update_session_title(session.id, "New")
+
+    state = repo.get_session_state(session.id)
+    assert state is not None
+    assert state.session.title == "New"
+
+
 def test_create_session_persists_initial_version_and_message():
     repo = make_repo()
 
