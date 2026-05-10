@@ -5,12 +5,23 @@ import os
 from uuid import UUID
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import Depends, FastAPI, File, Form, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.account_repository import AccountRepository
+from app.account_service import AccountService, AccountServiceError, user_to_dto
 from app.agent_openai import request_conversation_summary, request_conversation_turn
 from app.agent_repository import AgentRepository
 from app.agent_service import (
@@ -19,6 +30,21 @@ from app.agent_service import (
     ChatGptConversationService,
 )
 from app.agent_tools import GptImage2EditTool, create_openai_image_client
+from app.auth_dependencies import get_optional_current_user, require_admin_user
+from app.auth_schemas import (
+    AdminPasswordResetRequest,
+    AdminUserUpdateRequest,
+    AuthEnvelope,
+    LoginRequest,
+    RegisterRequest,
+    UserListEnvelope,
+)
+from app.auth_security import (
+    SESSION_COOKIE_NAME,
+    make_session_token,
+    session_cookie_secure,
+    session_expires_at,
+)
 from app.config import load_backend_env, openai_base_url
 
 load_backend_env()
@@ -33,6 +59,7 @@ from app.image_request import (
     validate_uploaded_image_content,
 )
 from app.openai_images import request_image_from_openai
+from app.user_models import UserRow
 
 logger = logging.getLogger(__name__)
 conversation_service: ChatGptConversationService | None = None
@@ -76,6 +103,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, error: HTTPException):
+    return JSONResponse({"error": error.detail}, status_code=error.status_code)
 
 
 def build_conversation_service() -> ChatGptConversationService:
@@ -164,6 +196,35 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
     )
 
 
+def build_account_service(db: Session) -> AccountService:
+    return AccountService(AccountRepository(db))
+
+
+def set_session_cookie(response: Response, user: UserRow) -> None:
+    expires_at = session_expires_at()
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=make_session_token(str(user.id), expires_at),
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="lax",
+        expires=expires_at,
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="lax",
+    )
+
+
+def auth_error_response(error: AccountServiceError) -> JSONResponse:
+    return JSONResponse({"error": str(error)}, status_code=error.status_code)
+
+
 def agent_error_response(error: Exception) -> JSONResponse:
     if isinstance(error, AgentInputError):
         return JSONResponse({"error": str(error)}, status_code=error.status_code)
@@ -219,6 +280,101 @@ async def read_conversation_uploads(
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.post("/api/auth/register")
+async def register_account(
+    payload: RegisterRequest,
+    response: Response,
+    db: Session = Depends(get_db_session),
+):
+    try:
+        user = build_account_service(db).register(
+            payload.email,
+            payload.username,
+            payload.password,
+        )
+        set_session_cookie(response, user)
+        return AuthEnvelope(user=user_to_dto(user)).model_dump(mode="json")
+    except AccountServiceError as error:
+        return auth_error_response(error)
+
+
+@app.post("/api/auth/login")
+async def login_account(
+    payload: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db_session),
+):
+    try:
+        user = build_account_service(db).login(payload.email, payload.password)
+        set_session_cookie(response, user)
+        return AuthEnvelope(user=user_to_dto(user)).model_dump(mode="json")
+    except AccountServiceError as error:
+        return auth_error_response(error)
+
+
+@app.post("/api/auth/logout")
+async def logout_account(response: Response):
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def get_auth_user(
+    current_user: UserRow | None = Depends(get_optional_current_user),
+):
+    return AuthEnvelope(
+        user=user_to_dto(current_user) if current_user is not None else None
+    ).model_dump(mode="json")
+
+
+@app.get("/api/admin/users")
+async def list_admin_users(
+    _admin_user: UserRow = Depends(require_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        users = build_account_service(db).list_users()
+        return UserListEnvelope(users=[user_to_dto(user) for user in users]).model_dump(
+            mode="json"
+        )
+    except AccountServiceError as error:
+        return auth_error_response(error)
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def update_admin_user(
+    user_id: str,
+    payload: AdminUserUpdateRequest,
+    admin_user: UserRow = Depends(require_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        user = build_account_service(db).update_user(
+            user_id,
+            email=payload.email,
+            username=payload.username,
+            is_active=payload.isActive,
+            acting_user=admin_user,
+        )
+        return AuthEnvelope(user=user_to_dto(user)).model_dump(mode="json")
+    except AccountServiceError as error:
+        return auth_error_response(error)
+
+
+@app.post("/api/admin/users/{user_id}/password")
+async def reset_admin_user_password(
+    user_id: str,
+    payload: AdminPasswordResetRequest,
+    _admin_user: UserRow = Depends(require_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        user = build_account_service(db).reset_password(user_id, payload.password)
+        return AuthEnvelope(user=user_to_dto(user)).model_dump(mode="json")
+    except AccountServiceError as error:
+        return auth_error_response(error)
 
 
 @app.post("/api/agent/conversation")
