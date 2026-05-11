@@ -58,7 +58,7 @@ from app.config import load_backend_env, openai_base_url
 load_backend_env()
 
 from app.db import get_db_session
-from app.image_storage import LocalImageStorage, MinioImageStorage
+from app.image_storage import MinioImageStorage
 from app.image_request import (
     MAX_IMAGE_BYTES,
     SUPPORTED_IMAGE_TYPES,
@@ -179,10 +179,7 @@ def build_conversation_service() -> ChatGptConversationService:
     return conversation_service
 
 
-def build_image_storage() -> LocalImageStorage | MinioImageStorage:
-    if os.getenv("IMAGE_STORAGE_BACKEND", "").strip().lower() == "local":
-        return LocalImageStorage()
-
+def build_image_storage() -> MinioImageStorage:
     endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     public_endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT", endpoint)
     return MinioImageStorage(

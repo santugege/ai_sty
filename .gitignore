@@ -24,4 +24,3 @@ backend/htmlcov/
 backend/.dev-server*.log
 frontend/.next-dev*.log
 output/manual-chat-test/
-data/

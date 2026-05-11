@@ -44,7 +44,7 @@ def test_docker_compose_defines_postgres_and_minio():
     minio = services["minio"]
     minio_init = services["minio-init"]
 
-    assert postgres["image"] == "postgres:16"
+    assert postgres["image"] == "${POSTGRES_IMAGE:-m.daocloud.io/docker.io/library/postgres:16}"
     assert postgres["container_name"] == "ai_sty_postgres"
     assert postgres["restart"] == "unless-stopped"
     assert postgres["environment"] == {
@@ -58,7 +58,7 @@ def test_docker_compose_defines_postgres_and_minio():
 
     minio_endpoint = urlsplit(env_values["MINIO_ENDPOINT"])
     minio_port = minio_endpoint.port
-    assert minio["image"] == "minio/minio:latest"
+    assert minio["image"] == "${MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:latest}"
     assert minio["container_name"] == "ai_sty_minio"
     assert minio["restart"] == "unless-stopped"
     assert minio["command"] == 'server /data --console-address ":9001"'
@@ -71,7 +71,7 @@ def test_docker_compose_defines_postgres_and_minio():
     assert "minio_data:/data" in minio["volumes"]
     assert minio["healthcheck"]["test"] == ["CMD", "mc", "ready", "local"]
 
-    assert minio_init["image"] == "minio/mc:latest"
+    assert minio_init["image"] == "${MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:latest}"
     assert minio_init["depends_on"]["minio"]["condition"] == "service_healthy"
     assert (
         f"mc alias set local http://minio:{minio_port} "

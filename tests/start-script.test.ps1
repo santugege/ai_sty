@@ -15,7 +15,7 @@ if (-not (Test-Path $startBat)) {
 $script = Get-Content -LiteralPath $startPs1 -Raw -Encoding UTF8
 $launcher = Get-Content -LiteralPath $startBat -Raw -Encoding UTF8
 
-foreach ($expected in @(
+$requiredText = @(
     "docker compose up -d postgres minio minio-init",
     "Wait-ForTcpPort",
     "127.0.0.1",
@@ -37,25 +37,36 @@ foreach ($expected in @(
     "`$FrontendUrl = `"http://localhost:`$FrontendPort`"",
     "Invoke-CheckedCommand",
     "`$LASTEXITCODE",
-    "[switch]`$Docker",
-    "[switch]`$Local",
-    "`$Local = `$true",
-    "sqlite+pysqlite:///",
-    "IMAGE_STORAGE_BACKEND",
-    "local",
-    "Test-TcpPort",
-    "Frontend already appears to be running",
-    "Backend already appears to be running",
     "Docker Compose failed",
-    "Use .\start.ps1 -SkipDocker",
     "Alembic migration failed",
     "npm.cmd",
     "run",
-    "dev",
-    ".\start.ps1 -Docker"
-)) {
+    "dev"
+)
+
+foreach ($expected in $requiredText) {
     if (-not $script.Contains($expected)) {
         throw "start.ps1 does not include expected text: $expected"
+    }
+}
+
+$forbiddenText = @(
+    "[switch]`$Docker",
+    "[switch]`$Local",
+    "[switch]`$SkipDocker",
+    "`$Local = `$true",
+    "sqlite+pysqlite:///",
+    "IMAGE_STORAGE_BACKEND",
+    "IMAGE_STORAGE_DIR",
+    "Local mode enabled",
+    "Use .\start.ps1 -SkipDocker",
+    ".\start.ps1 -Docker",
+    ".\start.ps1 -Local"
+)
+
+foreach ($forbidden in $forbiddenText) {
+    if ($script.Contains($forbidden)) {
+        throw "start.ps1 includes forbidden local or Docker-skip text: $forbidden"
     }
 }
 
