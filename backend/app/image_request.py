@@ -7,6 +7,7 @@ from typing import cast
 from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 
+from app.image_prompts import compose_product_image_prompt
 from app.tools import (
     ImageSize,
     ImageTool,
@@ -289,26 +290,15 @@ def compose_product_prompt(
     if purpose_rule is None:
         raise ImageRequestError(400, "请选择有效的图片用途。")
 
-    sections = [
-        tool.base_prompt,
-        (
-            "Product preservation rules:\n"
-            "- Preserve the uploaded product's shape, color, logo, package "
-            "structure, visible text, material cues, and identifying details.\n"
-            "- Do not invent extra accessories, fake labels, misleading claims, "
-            "or features not visible or described by the user.\n"
-            "- Keep the product commercially usable and avoid visual deformation."
-        ),
-        f"Platform style ({platform_rule.label}):\n{platform_rule.prompt}",
-        f"Image purpose ({purpose_rule.label}):\n{purpose_rule.prompt}",
-    ]
-
-    brief_lines = build_product_brief_lines(product_fields, user_prompt)
-    brief_lines = build_generation_settings_lines(generation_settings) + brief_lines
-    if brief_lines:
-        sections.append("User product brief:\n" + "\n".join(brief_lines))
-
-    return "\n\n".join(sections)
+    try:
+        return compose_product_image_prompt(
+            tool=tool,
+            user_prompt=user_prompt,
+            product_fields=product_fields,
+            generation_settings=generation_settings or ProductGenerationSettings(),
+        )
+    except ValueError as error:
+        raise ImageRequestError(400, str(error)) from error
 
 
 def build_product_brief_lines(

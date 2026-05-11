@@ -33,7 +33,11 @@ from app.agent_service import (
     AgentServiceError,
     ChatGptConversationService,
 )
-from app.agent_tools import GptImage2EditTool, create_openai_image_client
+from app.agent_tools import (
+    ChatGptImageEditTool,
+    ChatGptImageGenerateTool,
+    create_openai_image_client,
+)
 from app.auth_dependencies import (
     get_current_user,
     get_optional_current_user,
@@ -97,7 +101,6 @@ from app.subscription_service import (
 from app.user_models import UserRow
 
 logger = logging.getLogger(__name__)
-conversation_service: ChatGptConversationService | None = None
 
 
 def frontend_origins() -> list[str]:
@@ -149,36 +152,6 @@ async def http_exception_handler(request: Request, error: HTTPException):
     )
 
 
-def build_conversation_service() -> ChatGptConversationService:
-    global conversation_service
-    if conversation_service is not None:
-        return conversation_service
-
-    api_key = os.getenv("OPENAI_API_KEY") or ""
-    image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
-    agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.5")
-    base_url = openai_base_url()
-    image_client = create_openai_image_client(
-        api_key=api_key,
-        image_model=image_model,
-        base_url=base_url,
-    )
-
-    def planner(**kwargs):
-        return request_conversation_turn(
-            api_key=api_key,
-            agent_model=agent_model,
-            base_url=base_url,
-            **kwargs,
-        )
-
-    conversation_service = ChatGptConversationService(
-        planner,
-        {"gpt_image_2_edit": GptImage2EditTool(image_client=image_client, image_model=image_model)},
-    )
-    return conversation_service
-
-
 def build_image_storage() -> MinioImageStorage:
     endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     public_endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT", endpoint)
@@ -191,10 +164,7 @@ def build_image_storage() -> MinioImageStorage:
     )
 
 
-def build_agent_service(db: Session | None = None) -> ChatGptConversationService:
-    if db is None:
-        return build_conversation_service()
-
+def build_agent_service(db: Session) -> ChatGptConversationService:
     api_key = os.getenv("OPENAI_API_KEY") or ""
     image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
     agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini")
@@ -207,7 +177,7 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
 
     def planner(**kwargs):
         return request_conversation_turn(
-            api_key=api_key,
+            api_key=require_openai_api_key(api_key),
             agent_model=agent_model,
             base_url=base_url,
             **kwargs,
@@ -215,7 +185,7 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
 
     def summarizer(**kwargs):
         return request_conversation_summary(
-            api_key=api_key,
+            api_key=require_openai_api_key(api_key),
             agent_model=agent_model,
             base_url=base_url,
             **kwargs,
@@ -224,7 +194,11 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
     return ChatGptConversationService(
         planner=planner,
         tools={
-            "gpt_image_2_edit": GptImage2EditTool(
+            "chatgpt_image_generate": ChatGptImageGenerateTool(
+                image_client=image_client,
+                image_model=image_model,
+            ),
+            "chatgpt_image_edit": ChatGptImageEditTool(
                 image_client=image_client,
                 image_model=image_model,
             )
@@ -233,6 +207,13 @@ def build_agent_service(db: Session | None = None) -> ChatGptConversationService
         storage=build_image_storage(),
         summarizer=summarizer,
     )
+
+
+def require_openai_api_key(api_key: str | None = None) -> str:
+    api_key = (api_key or os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        raise AgentServiceError("服务器未配置 OPENAI_API_KEY。")
+    return api_key
 
 
 def build_account_service(db: Session) -> AccountService:
@@ -308,12 +289,6 @@ def plan_from_input(payload: SubscriptionPlanInput) -> SubscriptionPlanRow:
         is_default=payload.isDefault,
         sort_order=payload.sortOrder,
     )
-
-
-def run_agent_service(method_name: str, *args, **kwargs):
-    service = build_conversation_service()
-    method = getattr(service, method_name)
-    return method(*args, **kwargs)
 
 
 async def read_agent_upload(image: UploadFile) -> tuple[bytes, str, str]:
@@ -624,41 +599,6 @@ async def reset_admin_user_password(
         return AuthEnvelope(user=user_to_dto(user)).model_dump(mode="json")
     except AccountServiceError as error:
         return auth_error_response(error)
-
-
-@app.post("/api/agent/conversation")
-async def send_conversation_message(
-    message: str = Form(""),
-    size: str = Form("1536x1024"),
-    images: list[UploadFile] | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
-):
-    try:
-        attachments = await read_conversation_uploads(images)
-        envelope = await run_in_threadpool(
-            run_agent_service,
-            "send_message",
-            message=message,
-            attachments=attachments,
-            size=size,
-        )
-        return envelope.model_dump(mode="json")
-    except (AgentInputError, AgentServiceError, Exception) as error:
-        return agent_error_response(error)
-
-
-@app.post("/api/agent/conversation/reset")
-async def reset_conversation(
-    _current_user: UserRow = Depends(get_current_user),
-):
-    try:
-        envelope = await run_in_threadpool(
-            run_agent_service,
-            "reset",
-        )
-        return envelope.model_dump(mode="json")
-    except (AgentInputError, AgentServiceError, Exception) as error:
-        return agent_error_response(error)
 
 
 @app.get("/api/agent/sessions")

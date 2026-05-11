@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent_openai import (
-    request_agent_decision,
     request_conversation_summary,
     request_conversation_turn,
 )
@@ -121,81 +120,12 @@ def test_request_conversation_turn_includes_summary_in_model_context():
     assert payload["summary"] == "User prefers clean white backgrounds."
 
 
-def test_request_agent_decision_returns_edit_decision_from_gpt_5_5():
-    calls = []
-
-    class FakeResponses:
-        def create(self, **kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(
-                id="resp_123",
-                output_text=(
-                    '{"action":"edit","assistant_message":"I will edit it.",'
-                    '"tool_name":"gpt_image_2_edit",'
-                    '"tool_instruction":"Make it brighter."}'
-                ),
-            )
-
-    class FakeClient:
-        def __init__(self, api_key):
-            self.responses = FakeResponses()
-
-    decision = request_agent_decision(
-        api_key="key",
-        agent_model="gpt-5.5",
-        user_message="Make it brighter",
-        current_image_summary="Current product image exists.",
-        recent_messages=[],
-        previous_response_id=None,
-        client_factory=FakeClient,
-    )
-
-    assert calls[0]["model"] == "gpt-5.5"
-    assert "previous_response_id" not in calls[0]
-    assert decision.action == "edit"
-    assert decision.tool_name == "gpt_image_2_edit"
-    assert decision.response_id == "resp_123"
-
-
-def test_request_agent_decision_keeps_context_in_messages_not_previous_response_id():
-    calls = []
-
-    class FakeResponses:
-        def create(self, **kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(
-                id="resp_124",
-                output_text=(
-                    '{"action":"clarify","assistant_message":"What should change?",'
-                    '"tool_name":null,"tool_instruction":null}'
-                ),
-            )
-
-    class FakeClient:
-        def __init__(self, api_key):
-            self.responses = FakeResponses()
-
-    request_agent_decision(
-        api_key="key",
-        agent_model="gpt-5.5",
-        user_message="Make it better",
-        current_image_summary="Current product image exists.",
-        recent_messages=[],
-        previous_response_id="resp_previous",
-        client_factory=FakeClient,
-    )
-
-    assert "previous_response_id" not in calls[0]
-    encoded_input = calls[0]["input"][1]["content"]
-    assert "Make it better" in encoded_input
-
-
-def test_request_agent_decision_accepts_raw_json_string_response():
+def test_request_conversation_turn_accepts_raw_json_string_response():
     class FakeResponses:
         def create(self, **kwargs):
             return (
                 '{"action":"edit","assistant_message":"I will edit it.",'
-                '"tool_name":"gpt_image_2_edit",'
+                '"tool_name":"chatgpt_image_edit",'
                 '"tool_instruction":"Make it brighter."}'
             )
 
@@ -203,22 +133,23 @@ def test_request_agent_decision_accepts_raw_json_string_response():
         def __init__(self, api_key):
             self.responses = FakeResponses()
 
-    decision = request_agent_decision(
+    decision = request_conversation_turn(
         api_key="key",
         agent_model="gpt-5.5",
         user_message="Make it brighter",
-        current_image_summary="Current product image exists.",
         recent_messages=[],
+        has_current_image=True,
+        uploaded_image_count=0,
         previous_response_id=None,
         client_factory=FakeClient,
     )
 
     assert decision.action == "edit"
-    assert decision.tool_name == "gpt_image_2_edit"
+    assert decision.tool_name == "chatgpt_image_edit"
     assert decision.response_id is None
 
 
-def test_request_agent_decision_accepts_json_inside_markdown_response():
+def test_request_conversation_turn_accepts_json_inside_markdown_response():
     class FakeResponses:
         def create(self, **kwargs):
             return SimpleNamespace(
@@ -226,7 +157,7 @@ def test_request_agent_decision_accepts_json_inside_markdown_response():
                 output_text=(
                     "```json\n"
                     '{"action":"edit","assistant_message":"I will edit it.",'
-                    '"tool_name":"gpt_image_2_edit",'
+                    '"tool_name":"chatgpt_image_edit",'
                     '"tool_instruction":"Make it brighter."}'
                     "\n```"
                 ),
@@ -236,12 +167,13 @@ def test_request_agent_decision_accepts_json_inside_markdown_response():
         def __init__(self, api_key):
             self.responses = FakeResponses()
 
-    decision = request_agent_decision(
+    decision = request_conversation_turn(
         api_key="key",
         agent_model="gpt-5.5",
         user_message="Make it brighter",
-        current_image_summary="Current product image exists.",
         recent_messages=[],
+        has_current_image=True,
+        uploaded_image_count=0,
         previous_response_id=None,
         client_factory=FakeClient,
     )
@@ -251,7 +183,7 @@ def test_request_agent_decision_accepts_json_inside_markdown_response():
     assert decision.response_id == "resp_markdown"
 
 
-def test_request_agent_decision_passes_base_url_to_client_factory():
+def test_request_conversation_turn_passes_base_url_to_client_factory():
     calls = []
 
     class FakeResponses:
@@ -269,12 +201,13 @@ def test_request_agent_decision_passes_base_url_to_client_factory():
             calls.append(kwargs)
             self.responses = FakeResponses()
 
-    request_agent_decision(
+    request_conversation_turn(
         api_key="key",
         agent_model="gpt-5.5",
         user_message="Make it better",
-        current_image_summary="Current product image exists.",
         recent_messages=[],
+        has_current_image=True,
+        uploaded_image_count=0,
         previous_response_id=None,
         base_url="https://api.example.test/v1",
         client_factory=FakeClient,
@@ -285,7 +218,7 @@ def test_request_agent_decision_passes_base_url_to_client_factory():
     ]
 
 
-def test_request_agent_decision_raises_for_invalid_json_output():
+def test_request_conversation_turn_raises_for_invalid_json_output():
     class FakeResponses:
         def create(self, **kwargs):
             return SimpleNamespace(id="resp_125", output_text="not json")
@@ -295,18 +228,19 @@ def test_request_agent_decision_raises_for_invalid_json_output():
             self.responses = FakeResponses()
 
     with pytest.raises(RuntimeError, match="Agent decision response was not valid JSON."):
-        request_agent_decision(
+        request_conversation_turn(
             api_key="key",
             agent_model="gpt-5.5",
             user_message="Make it brighter",
-            current_image_summary="Current product image exists.",
             recent_messages=[],
+            has_current_image=True,
+            uploaded_image_count=0,
             previous_response_id=None,
             client_factory=FakeClient,
         )
 
 
-def test_request_agent_decision_raises_for_edit_with_wrong_tool_name():
+def test_request_conversation_turn_raises_for_edit_with_wrong_tool_name():
     class FakeResponses:
         def create(self, **kwargs):
             return SimpleNamespace(
@@ -323,25 +257,26 @@ def test_request_agent_decision_raises_for_edit_with_wrong_tool_name():
             self.responses = FakeResponses()
 
     with pytest.raises(RuntimeError, match="Agent edit decision was invalid."):
-        request_agent_decision(
+        request_conversation_turn(
             api_key="key",
             agent_model="gpt-5.5",
             user_message="Make it brighter",
-            current_image_summary="Current product image exists.",
             recent_messages=[],
+            has_current_image=True,
+            uploaded_image_count=0,
             previous_response_id=None,
             client_factory=FakeClient,
         )
 
 
-def test_request_agent_decision_raises_for_edit_with_empty_tool_instruction():
+def test_request_conversation_turn_raises_for_edit_with_empty_tool_instruction():
     class FakeResponses:
         def create(self, **kwargs):
             return SimpleNamespace(
                 id="resp_127",
                 output_text=(
                     '{"action":"edit","assistant_message":"I will edit it.",'
-                    '"tool_name":"gpt_image_2_edit",'
+                    '"tool_name":"chatgpt_image_edit",'
                     '"tool_instruction":"  "}'
                 ),
             )
@@ -351,25 +286,26 @@ def test_request_agent_decision_raises_for_edit_with_empty_tool_instruction():
             self.responses = FakeResponses()
 
     with pytest.raises(RuntimeError, match="Agent edit decision was invalid."):
-        request_agent_decision(
+        request_conversation_turn(
             api_key="key",
             agent_model="gpt-5.5",
             user_message="Make it brighter",
-            current_image_summary="Current product image exists.",
             recent_messages=[],
+            has_current_image=True,
+            uploaded_image_count=0,
             previous_response_id=None,
             client_factory=FakeClient,
         )
 
 
-def test_request_agent_decision_raises_for_invalid_action():
+def test_request_conversation_turn_raises_for_invalid_action():
     class FakeResponses:
         def create(self, **kwargs):
             return SimpleNamespace(
                 id="resp_128",
                 output_text=(
                     '{"action":"delete","assistant_message":"I will edit it.",'
-                    '"tool_name":"gpt_image_2_edit",'
+                    '"tool_name":"chatgpt_image_edit",'
                     '"tool_instruction":"Make it brighter."}'
                 ),
             )
@@ -379,12 +315,91 @@ def test_request_agent_decision_raises_for_invalid_action():
             self.responses = FakeResponses()
 
     with pytest.raises(RuntimeError, match="Agent decision action was invalid."):
-        request_agent_decision(
+        request_conversation_turn(
             api_key="key",
             agent_model="gpt-5.5",
             user_message="Make it brighter",
-            current_image_summary="Current product image exists.",
             recent_messages=[],
+            has_current_image=True,
+            uploaded_image_count=0,
             previous_response_id=None,
             client_factory=FakeClient,
         )
+
+
+def test_request_conversation_turn_accepts_generate_action():
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                id="resp_generate",
+                output_text=(
+                    '{"action":"generate","assistant_message":"I will create it.",'
+                    '"tool_name":"chatgpt_image_generate",'
+                    '"tool_instruction":{'
+                    '"user_goal":"Create a calm mountain lake.",'
+                    '"scene":"Mountain lake at sunrise",'
+                    '"subject":"A still lake",'
+                    '"style":"Photorealistic",'
+                    '"composition":"Wide landscape",'
+                    '"lighting":"Soft sunrise",'
+                    '"preserve":[],'
+                    '"change":[],'
+                    '"avoid":["watermark"]'
+                    "}}"
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    decision = request_conversation_turn(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Generate a sunrise lake.",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    assert decision.action == "generate"
+    assert decision.tool_name == "chatgpt_image_generate"
+    assert "Mountain lake at sunrise" in decision.tool_instruction
+
+
+def test_request_conversation_turn_uses_chatgpt_general_prompt_without_product_terms():
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                id="resp_answer",
+                output_text=(
+                    '{"action":"answer","assistant_message":"Please upload an image.",'
+                    '"tool_name":null,"tool_instruction":null}'
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    request_conversation_turn(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Help me edit an image.",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    system_prompt = calls[0]["input"][0]["content"]
+    assert "general ChatGPT-style image assistant" in system_prompt
+    assert "Pinduoduo" not in system_prompt
+    assert "Taobao" not in system_prompt
+    assert "selling point" not in system_prompt

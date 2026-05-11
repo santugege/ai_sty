@@ -77,7 +77,7 @@ def test_requests_product_image_generation_without_uploaded_image():
     assert result.images[0].src == "data:image/png;base64,abc123"
     assert fake_client.images.generate_kwargs["model"] == "gpt-image-2"
     assert fake_client.images.generate_kwargs["size"] == "2048x2048"
-    assert fake_client.images.generate_kwargs["quality"] == "auto"
+    assert fake_client.images.generate_kwargs["quality"] == "high"
     assert "商品场景" in fake_client.images.generate_kwargs["prompt"]
     assert fake_client.images.edit_kwargs is None
 
@@ -153,6 +153,7 @@ def test_requests_product_image_edit_when_uploaded_image_is_present():
     assert fake_client.images.edit_kwargs["image"].name == "product.png"
     assert "保留瓶身居中" in fake_client.images.edit_kwargs["prompt"]
     assert fake_client.images.edit_kwargs["size"] == "1536x1024"
+    assert fake_client.images.edit_kwargs["quality"] == "high"
     assert fake_client.images.generate_kwargs is None
 
 

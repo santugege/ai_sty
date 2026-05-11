@@ -83,7 +83,7 @@ def request_single_image(
             image=image_file,
             prompt=prompt,
             size=request.size,
-            quality="auto",
+            quality="high",
         )
         return normalize_openai_image_response(response)
 
@@ -91,7 +91,7 @@ def request_single_image(
         model=model,
         prompt=prompt,
         size=request.size,
-        quality="auto",
+        quality="high",
     )
     return normalize_openai_image_response(response)
 

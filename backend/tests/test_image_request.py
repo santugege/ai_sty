@@ -454,3 +454,28 @@ def test_compose_product_prompt_uses_structured_ecommerce_fields():
     assert "Promotion text: 限时立减 20 元" in prompt
     assert "Avoid elements: 不要额外配件" in prompt
     assert "Additional notes: 保留瓶身居中" in prompt
+
+
+def test_product_prompt_uses_shared_quality_and_product_layers():
+    tool = get_tool_by_id("product")
+    prompt = compose_tool_prompt(
+        tool,
+        "Keep the bottle centered.",
+        ProductImageFields(
+            platform_style="pinduoduo",
+            image_purpose="main-image",
+            product_category="drink",
+            selling_points="fresh taste",
+            scene_style="bright studio",
+            visual_tone="clean",
+            promotion_text="",
+            preserve_requirements="preserve label",
+            avoid_elements="extra bottles",
+        ),
+        ProductGenerationSettings(aspect_ratio="1:1", image_count=1),
+    )
+
+    assert "Global image quality rules:" in prompt
+    assert "Product preservation rules:" in prompt
+    assert "Platform style" in prompt
+    assert "Image purpose" in prompt

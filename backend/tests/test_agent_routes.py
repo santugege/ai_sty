@@ -20,11 +20,11 @@ TINY_PNG = base64.b64decode(
 )
 
 
-def test_conversation_routes_exist():
+def test_only_persisted_agent_session_routes_exist():
     routes = {route.path for route in app.routes}
 
-    assert "/api/agent/conversation" in routes
-    assert "/api/agent/conversation/reset" in routes
+    assert "/api/agent/conversation" not in routes
+    assert "/api/agent/conversation/reset" not in routes
     assert "/api/agent/sessions" in routes
     assert "/api/agent/sessions/{session_id}" in routes
     assert "/api/agent/sessions/{session_id}/messages" in routes
@@ -155,7 +155,8 @@ def test_build_agent_service_wires_persistent_dependencies(monkeypatch):
         return "summary"
 
     monkeypatch.setattr(app_main, "AgentRepository", FakeRepo, raising=False)
-    monkeypatch.setattr(app_main, "GptImage2EditTool", FakeTool)
+    monkeypatch.setattr(app_main, "ChatGptImageGenerateTool", FakeTool)
+    monkeypatch.setattr(app_main, "ChatGptImageEditTool", FakeTool)
     monkeypatch.setattr(app_main, "build_image_storage", lambda: storage, raising=False)
     monkeypatch.setattr(app_main, "create_openai_image_client", fake_image_client)
     monkeypatch.setattr(app_main, "request_conversation_turn", fake_turn)
@@ -168,8 +169,10 @@ def test_build_agent_service_wires_persistent_dependencies(monkeypatch):
 
     assert repo_calls == [db]
     assert service.storage is storage
-    assert "gpt_image_2_edit" in service.tools
+    assert "chatgpt_image_generate" in service.tools
+    assert "chatgpt_image_edit" in service.tools
     assert tool_calls == [
+        {"image_client": image_client, "image_model": "gpt-image-test"},
         {"image_client": image_client, "image_model": "gpt-image-test"}
     ]
     assert service.planner(
@@ -198,7 +201,12 @@ def test_build_agent_service_defaults_to_gpt_5_4_mini_agent_model(monkeypatch):
     monkeypatch.setattr(app_main, "AgentRepository", FakeRepo, raising=False)
     monkeypatch.setattr(
         app_main,
-        "GptImage2EditTool",
+        "ChatGptImageGenerateTool",
+        lambda image_client, image_model: object(),
+    )
+    monkeypatch.setattr(
+        app_main,
+        "ChatGptImageEditTool",
         lambda image_client, image_model: object(),
     )
     monkeypatch.setattr(app_main, "build_image_storage", lambda: object(), raising=False)
@@ -214,6 +222,7 @@ def test_build_agent_service_defaults_to_gpt_5_4_mini_agent_model(monkeypatch):
         lambda **kwargs: summary_calls.append(kwargs) or "summary",
         raising=False,
     )
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.delenv("OPENAI_AGENT_MODEL", raising=False)
 
     service = app_main.build_agent_service(object())
@@ -426,144 +435,3 @@ def test_session_route_uses_agent_error_response(monkeypatch, authenticated_user
 
     assert response.status_code == 400
     assert response.json() == {"error": "bad session input"}
-
-
-def test_conversation_accepts_text_and_image_attachment(monkeypatch, authenticated_user):
-    class FakeEnvelope:
-        def model_dump(self, mode):
-            return {"messages": [{"role": "assistant", "content": "ok"}]}
-
-    class FakeService:
-        def send_message(self, message, attachments, size):
-            assert message == "把背景换成白色"
-            assert size == "1536x1024"
-            assert attachments == [
-                {
-                    "image_bytes": TINY_PNG,
-                    "image_name": "product.png",
-                    "mime_type": "image/png",
-                }
-            ]
-            return FakeEnvelope()
-
-    monkeypatch.setattr("app.main.build_conversation_service", lambda: FakeService())
-
-    response = client.post(
-        "/api/agent/conversation",
-        data={"message": "把背景换成白色", "size": "1536x1024"},
-        files={"images": ("product.png", TINY_PNG, "image/png")},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"messages": [{"role": "assistant", "content": "ok"}]}
-
-
-def test_conversation_allows_text_follow_up_without_attachment(
-    monkeypatch, authenticated_user
-):
-    class FakeEnvelope:
-        def model_dump(self, mode):
-            return {"ok": True}
-
-    class FakeService:
-        def send_message(self, message, attachments, size):
-            assert message == "再亮一点"
-            assert attachments == []
-            return FakeEnvelope()
-
-    monkeypatch.setattr("app.main.build_conversation_service", lambda: FakeService())
-
-    response = client.post(
-        "/api/agent/conversation",
-        data={"message": "再亮一点", "size": "1536x1024"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": True}
-
-
-def test_conversation_rejects_unsupported_image_type_before_service(
-    monkeypatch, authenticated_user
-):
-    service_was_built = False
-
-    def fail_if_called():
-        nonlocal service_was_built
-        service_was_built = True
-        raise AssertionError("service should not be built for invalid uploads")
-
-    monkeypatch.setattr("app.main.build_conversation_service", fail_if_called)
-
-    response = client.post(
-        "/api/agent/conversation",
-        data={"message": "编辑这张图"},
-        files={"images": ("product.gif", b"gif89a", "image/gif")},
-    )
-
-    assert response.status_code == 400
-    assert "error" in response.json()
-    assert service_was_built is False
-
-
-def test_conversation_rejects_oversized_image_before_service(
-    monkeypatch, authenticated_user
-):
-    service_was_built = False
-
-    def fail_if_called():
-        nonlocal service_was_built
-        service_was_built = True
-        raise AssertionError("service should not be built for invalid uploads")
-
-    monkeypatch.setattr("app.main.build_conversation_service", fail_if_called)
-
-    response = client.post(
-        "/api/agent/conversation",
-        data={"message": "编辑这张图"},
-        files={
-            "images": (
-                "product.png",
-                b"x" * (MAX_IMAGE_BYTES + 1),
-                "image/png",
-            )
-        },
-    )
-
-    assert response.status_code == 400
-    assert "error" in response.json()
-    assert service_was_built is False
-
-
-def test_conversation_unexpected_failure_returns_json_500(
-    monkeypatch, authenticated_user
-):
-    class FakeService:
-        def send_message(self, message, attachments, size):
-            raise RuntimeError("sk-test stack trace")
-
-    monkeypatch.setattr("app.main.build_conversation_service", lambda: FakeService())
-
-    response = client.post(
-        "/api/agent/conversation",
-        data={"message": "再亮一点", "size": "1536x1024"},
-    )
-
-    assert response.status_code == 500
-    assert response.json() == {"error": "Agent request failed."}
-
-
-def test_reset_conversation_returns_empty_envelope(monkeypatch, authenticated_user):
-    class FakeEnvelope:
-        def model_dump(self, mode):
-            return {"messages": [], "currentImage": None}
-
-    class FakeService:
-        def reset(self):
-            return FakeEnvelope()
-
-    monkeypatch.setattr("app.main.build_conversation_service", lambda: FakeService())
-
-    response = client.post("/api/agent/conversation/reset")
-
-    assert response.status_code == 200
-    assert response.json() == {"messages": [], "currentImage": None}
