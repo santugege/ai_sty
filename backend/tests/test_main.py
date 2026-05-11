@@ -220,8 +220,8 @@ def test_image_route_returns_generated_image(monkeypatch, authenticated_user):
         assert valid_request.image_bytes == TINY_PNG
         assert api_key == "key"
         assert model == "gpt-image-2"
-        return GeneratedImageEnvelope.from_images(
-            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        return GeneratedImageEnvelope(
+            images=[GeneratedImageResult(src="data:image/png;base64,abc123")]
         )
 
     monkeypatch.setattr(
@@ -269,8 +269,8 @@ def test_image_route_passes_openai_base_url_when_configured(
 
     def fake_request_image_from_openai(valid_request, **kwargs):
         captured_kwargs.update(kwargs)
-        return GeneratedImageEnvelope.from_images(
-            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        return GeneratedImageEnvelope(
+            images=[GeneratedImageResult(src="data:image/png;base64,abc123")]
         )
 
     monkeypatch.setattr(
@@ -298,8 +298,8 @@ def test_image_route_offloads_openai_request_to_threadpool(
     offload_calls = []
 
     def fake_request_image_from_openai(valid_request, api_key, model):
-        return GeneratedImageEnvelope.from_images(
-            [GeneratedImageResult(src="data:image/png;base64,abc123")]
+        return GeneratedImageEnvelope(
+            images=[GeneratedImageResult(src="data:image/png;base64,abc123")]
         )
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
@@ -338,8 +338,8 @@ def test_image_route_passes_uploaded_product_image_to_openai_request(
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         captured_request["valid_request"] = valid_request
-        return GeneratedImageEnvelope.from_images(
-            [GeneratedImageResult(src="data:image/png;base64,edited")]
+        return GeneratedImageEnvelope(
+            images=[GeneratedImageResult(src="data:image/png;base64,edited")]
         )
 
     monkeypatch.setattr(
@@ -413,8 +413,8 @@ def test_image_route_passes_product_fields_to_openai_request(
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         captured_request["valid_request"] = valid_request
-        return GeneratedImageEnvelope.from_images(
-            [GeneratedImageResult(src="data:image/png;base64,product")]
+        return GeneratedImageEnvelope(
+            images=[GeneratedImageResult(src="data:image/png;base64,product")]
         )
 
     monkeypatch.setattr(

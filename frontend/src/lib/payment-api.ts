@@ -2,12 +2,6 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://localhost:8000";
 
-export type CreateZpayOrderInput = {
-  subject: string;
-  amount: string;
-  payType: "alipay" | "wxpay";
-};
-
 export type CreateSubscriptionZpayOrderInput = {
   planId: string;
   payType: "alipay" | "wxpay";
@@ -29,19 +23,6 @@ export type PaymentOrder = {
 export type PaymentOrderEnvelope = {
   order: PaymentOrder;
 };
-
-export async function createZpayOrder(
-  input: CreateZpayOrderInput,
-): Promise<PaymentOrderEnvelope> {
-  return readJsonResponse<PaymentOrderEnvelope>(
-    await fetch(`${apiBaseUrl}/api/payments/zpay/orders`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
-  );
-}
 
 export async function createSubscriptionZpayOrder(
   input: CreateSubscriptionZpayOrderInput,

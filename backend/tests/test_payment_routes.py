@@ -83,37 +83,13 @@ def make_plan(
     return plan
 
 
-def test_create_zpay_payment_order_route_requires_authentication():
+def test_generic_zpay_payment_order_route_is_not_exposed():
     response = client.post(
         "/api/payments/zpay/orders",
         json={"subject": "Image credits", "amount": "9.90", "payType": "alipay"},
     )
 
-    assert response.status_code == 401
-
-
-def test_create_zpay_payment_order_route_returns_order_and_payment_url(monkeypatch):
-    test_client, session = make_client(monkeypatch)
-    try:
-        response = test_client.post(
-            "/api/payments/zpay/orders",
-            json={"subject": "Image credits", "amount": "9.90", "payType": "alipay"},
-        )
-    finally:
-        cleanup_overrides()
-
-    payload = response.json()
-    parsed = urlsplit(payload["order"]["paymentUrl"])
-    query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
-    stored = session.query(PaymentOrderRow).one()
-
-    assert response.status_code == 200
-    assert payload["order"]["orderNo"] == stored.order_no
-    assert payload["order"]["status"] == "pending"
-    assert payload["order"]["amount"] == "9.90"
-    assert payload["order"]["payType"] == "alipay"
-    assert query["out_trade_no"] == stored.order_no
-    assert query["sign_type"] == "MD5"
+    assert response.status_code == 404
 
 
 def test_create_subscription_zpay_order_route_returns_plan_price_payment_url(
@@ -214,7 +190,6 @@ def test_create_subscription_zpay_order_route_reuses_active_free_subscription(
     assert subscriptions[0].plan_id == plan.id
     assert subscriptions[0].status == "active"
 
-
 def test_zpay_notify_route_activates_subscription_order_once_and_is_idempotent(
     monkeypatch,
 ):
@@ -264,39 +239,3 @@ def test_zpay_notify_route_activates_subscription_order_once_and_is_idempotent(
     assert len(subscriptions) == 1
     assert subscriptions[0].plan_id == plan.id
     assert subscriptions[0].status == "active"
-
-
-def test_zpay_notify_route_marks_order_paid_and_returns_success(monkeypatch):
-    test_client, session = make_client(monkeypatch)
-    try:
-        create_response = test_client.post(
-            "/api/payments/zpay/orders",
-            json={"subject": "Image credits", "amount": "9.90", "payType": "alipay"},
-        )
-        order_no = create_response.json()["order"]["orderNo"]
-        callback = signed_params(
-            {
-                "pid": "merchant-1",
-                "trade_no": "202605102200001",
-                "out_trade_no": order_no,
-                "type": "alipay",
-                "name": "Image credits",
-                "money": "9.90",
-                "trade_status": "TRADE_SUCCESS",
-                "param": "user_id=U00000001",
-            },
-            "secret",
-        )
-
-        notify_response = test_client.get(
-            "/api/payments/zpay/notify",
-            params=callback,
-        )
-    finally:
-        cleanup_overrides()
-
-    stored = session.query(PaymentOrderRow).one()
-    assert notify_response.status_code == 200
-    assert notify_response.text == "success"
-    assert stored.status == "paid"
-    assert stored.provider_trade_no == "202605102200001"

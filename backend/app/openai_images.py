@@ -21,31 +21,6 @@ class GeneratedImageResult:
 class GeneratedImageEnvelope:
     images: list[GeneratedImageResult]
 
-    @classmethod
-    def from_images(
-        cls,
-        images: list[GeneratedImageResult],
-    ) -> "GeneratedImageEnvelope":
-        return cls(images=images)
-
-    @property
-    def src(self) -> str:
-        return self.first.src
-
-    @property
-    def mime_type(self) -> str:
-        return self.first.mime_type
-
-    @property
-    def revised_prompt(self) -> str | None:
-        return self.first.revised_prompt
-
-    @property
-    def first(self) -> GeneratedImageResult:
-        if not self.images:
-            raise RuntimeError("OpenAI 没有返回图片结果。")
-        return self.images[0]
-
 
 def request_image_from_openai(
     request: ValidImageRequest,
@@ -66,7 +41,7 @@ def request_image_from_openai(
         request_single_image(client, request, model, prompt)
         for _ in range(request.generation_settings.image_count)
     ]
-    return GeneratedImageEnvelope.from_images(images)
+    return GeneratedImageEnvelope(images=images)
 
 
 def request_single_image(

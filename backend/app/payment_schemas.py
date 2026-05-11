@@ -3,14 +3,6 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 
-class CreateZpayOrderRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    subject: str
-    amount: str
-    payType: str = "alipay"
-
-
 class CreateSubscriptionZpayOrderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

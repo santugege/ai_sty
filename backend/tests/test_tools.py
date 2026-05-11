@@ -4,7 +4,6 @@ from app.tools import (
     get_tool_by_id,
     image_sizes,
     image_tools,
-    is_image_size,
     product_image_purposes,
     product_platform_styles,
 )
@@ -14,15 +13,18 @@ def test_defines_only_product_tool():
     assert [tool.id for tool in image_tools] == ["product"]
 
 
-def test_product_tool_can_generate_or_edit():
-    assert get_tool_by_id("product").mode == "generate"
-
-
-def test_product_tool_requires_original_upload():
+def test_product_tool_keeps_only_product_runtime_fields():
     tool = get_tool_by_id("product")
 
-    assert tool.image_required is True
+    assert tool.title == "商品图生成"
+    assert tool.default_size == "1536x1024"
+    assert tool.size_options == image_sizes
     assert "If no product image" not in tool.base_prompt
+    assert not hasattr(tool, "mode")
+    assert not hasattr(tool, "prompt_label")
+    assert not hasattr(tool, "prompt_required")
+    assert not hasattr(tool, "image_required")
+    assert not hasattr(tool, "image_label")
 
 
 def test_removed_tools_are_not_available():
@@ -42,10 +44,6 @@ def test_accepts_only_configured_image_sizes():
         "3840x2160",
         "2160x3840",
     )
-    assert is_image_size("1536x1024") is True
-    assert is_image_size("2048x2048") is True
-    assert is_image_size("3840x2160") is True
-    assert is_image_size("800x800") is False
 
 
 def test_defines_product_platform_styles_in_display_order():

@@ -12,7 +12,6 @@ ImageSize = Literal[
     "3840x2160",
     "2160x3840",
 ]
-ToolMode = Literal["generate"]
 ToolId = Literal["product"]
 ProductPlatformStyleId = Literal[
     "pinduoduo",
@@ -144,11 +143,6 @@ product_image_purposes: tuple[ProductPromptRule, ...] = (
 class ImageTool:
     id: ToolId
     title: str
-    mode: ToolMode
-    prompt_label: str
-    prompt_required: bool
-    image_required: bool
-    image_label: str
     default_size: ImageSize
     size_options: tuple[ImageSize, ...]
     base_prompt: str
@@ -158,11 +152,6 @@ image_tools: tuple[ImageTool, ...] = (
     ImageTool(
         id="product",
         title="商品图生成",
-        mode="generate",
-        prompt_label="商品场景",
-        prompt_required=False,
-        image_required=True,
-        image_label="上传商品图",
         default_size="1536x1024",
         size_options=image_sizes,
         base_prompt=(
@@ -192,7 +181,3 @@ def get_product_image_purpose(purpose_id: str) -> ProductPromptRule | None:
         (purpose for purpose in product_image_purposes if purpose.id == purpose_id),
         None,
     )
-
-
-def is_image_size(value: str) -> bool:
-    return value in image_sizes

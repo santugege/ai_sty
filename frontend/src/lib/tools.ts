@@ -14,9 +14,7 @@ export type ToolId = "product";
 export type ImageTool = {
   id: ToolId;
   title: string;
-  description: string;
   defaultSize: ImageSize;
-  sizeOptions: ImageSize[];
 };
 
 export type ProductPlatformStyleId =
@@ -99,9 +97,7 @@ export const imageTools: ImageTool[] = [
   {
     id: "product",
     title: "电商商品图工作台",
-    description: "用平台、比例、像素和对话迭代生成适合上架的商品图。",
     defaultSize: "1536x1024",
-    sizeOptions: [...imageSizes],
   },
 ];
 

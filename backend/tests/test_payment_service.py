@@ -96,53 +96,17 @@ def test_load_zpay_settings_requires_pid_and_key(monkeypatch):
     assert str(error.value) == "ZPAY is not configured."
 
 
-def test_create_zpay_order_persists_pending_order_with_signed_payment_url(monkeypatch):
+def test_create_subscription_zpay_order_rejects_unsupported_pay_type(monkeypatch):
     db = make_session()
     user = make_user(db)
-    monkeypatch.setenv("ZPAY_PID", "merchant-1")
-    monkeypatch.setenv("ZPAY_KEY", "secret")
-    monkeypatch.setenv("ZPAY_SUBMIT_URL", "https://zpayz.cn/submit.php")
-    monkeypatch.setenv("BACKEND_PUBLIC_ORIGIN", "https://api.example.com")
-    monkeypatch.setenv("FRONTEND_ORIGIN", "https://app.example.com")
-
-    order = PaymentService(PaymentRepository(db)).create_zpay_order(
-        user=user,
-        subject="Image credits",
-        amount="9.90",
-        pay_type="alipay",
-    )
-
-    stored = db.query(PaymentOrderRow).one()
-    parsed = urlsplit(order.payment_url)
-    query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
-
-    assert stored.order_no == order.order_no
-    assert stored.user_id == user.id
-    assert stored.user_public_id == "U00000001"
-    assert stored.provider == "zpay"
-    assert stored.status == "pending"
-    assert stored.amount_cents == 990
-    assert parsed.netloc == "zpayz.cn"
-    assert query["pid"] == "merchant-1"
-    assert query["name"] == "Image credits"
-    assert query["money"] == "9.90"
-    assert query["notify_url"] == "https://api.example.com/api/payments/zpay/notify"
-    assert query["return_url"] == "https://app.example.com/payments/return"
-    assert query["param"] == "user_id=U00000001"
-    assert query["sign_type"] == "MD5"
-
-
-def test_create_zpay_order_rejects_unsupported_pay_type(monkeypatch):
-    db = make_session()
-    user = make_user(db)
+    plan = make_plan(db, price_cents=1990)
     monkeypatch.setenv("ZPAY_PID", "merchant-1")
     monkeypatch.setenv("ZPAY_KEY", "secret")
 
     with pytest.raises(PaymentServiceError) as error:
-        PaymentService(PaymentRepository(db)).create_zpay_order(
+        PaymentService(PaymentRepository(db)).create_subscription_zpay_order(
             user=user,
-            subject="Image credits",
-            amount="9.90",
+            plan=plan,
             pay_type="unionpay",
         )
 

@@ -97,9 +97,6 @@ async def validate_image_form(
         raise ImageRequestError(400, "请选择有效的图片工具。")
 
     normalized_prompt = (prompt or "").strip()
-    if tool.prompt_required and not normalized_prompt:
-        raise ImageRequestError(400, f"请输入{tool.prompt_label}。")
-
     image_bytes: bytes | None = None
     image_name: str | None = None
     image_type: str | None = None
@@ -121,8 +118,8 @@ async def validate_image_form(
 
         validate_uploaded_image_content(image_bytes, image_type)
 
-    if tool.image_required and image_bytes is None:
-        raise ImageRequestError(400, f"请{tool.image_label}。")
+    if tool.id == "product" and image_bytes is None:
+        raise ImageRequestError(400, "请上传商品图。")
 
     requested_size = (size or "").strip()
     normalized_size = (
@@ -299,25 +296,6 @@ def compose_product_prompt(
         )
     except ValueError as error:
         raise ImageRequestError(400, str(error)) from error
-
-
-def build_product_brief_lines(
-    product_fields: ProductImageFields,
-    user_prompt: str,
-) -> list[str]:
-    field_lines = [
-        ("Product category", product_fields.product_category),
-        ("Selling points", product_fields.selling_points),
-        ("Scene style", product_fields.scene_style),
-        ("Visual tone", product_fields.visual_tone),
-        ("Promotion text", product_fields.promotion_text),
-        ("Preserve requirements", product_fields.preserve_requirements),
-        ("Avoid elements", product_fields.avoid_elements),
-        ("Additional notes", user_prompt),
-    ]
-
-    return [f"- {label}: {value}" for label, value in field_lines if value]
-
 
 def build_generation_settings_lines(
     generation_settings: ProductGenerationSettings | None,

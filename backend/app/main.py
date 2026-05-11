@@ -75,7 +75,6 @@ from app.payment_models import PaymentOrderRow
 from app.payment_repository import PaymentRepository
 from app.payment_schemas import (
     CreateSubscriptionZpayOrderRequest,
-    CreateZpayOrderRequest,
     PaymentOrderEnvelope,
 )
 from app.payment_service import (
@@ -387,26 +386,6 @@ async def list_admin_users(
         )
     except AccountServiceError as error:
         return auth_error_response(error)
-
-
-@app.post("/api/payments/zpay/orders")
-async def create_zpay_payment_order(
-    payload: CreateZpayOrderRequest,
-    current_user: UserRow = Depends(get_current_user),
-    db: Session = Depends(get_db_session),
-):
-    try:
-        order = build_payment_service(db).create_zpay_order(
-            user=current_user,
-            subject=payload.subject,
-            amount=payload.amount,
-            pay_type=payload.payType,
-        )
-        return PaymentOrderEnvelope(order=payment_order_to_dto(order)).model_dump(
-            mode="json"
-        )
-    except PaymentServiceError as error:
-        return payment_error_response(error)
 
 
 @app.post("/api/payments/zpay/subscription-orders")

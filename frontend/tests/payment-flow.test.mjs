@@ -2,15 +2,17 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("payment api helper creates zpay orders with cookie credentials", () => {
+test("payment api exposes only subscription zpay order creation", () => {
   const source = readFileSync("src/lib/payment-api.ts", "utf8");
 
-  assert.match(source, /createZpayOrder/);
-  assert.match(source, /\/api\/payments\/zpay\/orders/);
+  assert.doesNotMatch(source, /createZpayOrder/);
+  assert.doesNotMatch(source, /\/api\/payments\/zpay\/orders/);
+  assert.match(source, /createSubscriptionZpayOrder/);
+  assert.match(source, /\/api\/payments\/zpay\/subscription-orders/);
   assert.match(source, /credentials: "include"/);
-  assert.match(source, /subject/);
-  assert.match(source, /amount/);
   assert.match(source, /payType/);
+  assert.doesNotMatch(source, /CreateZpayOrderInput[\s\S]*subject/);
+  assert.doesNotMatch(source, /CreateZpayOrderInput[\s\S]*amount/);
 });
 
 test("billing page exposes subscription zpay purchase flow", () => {

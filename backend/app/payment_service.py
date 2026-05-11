@@ -39,43 +39,6 @@ class PaymentService:
     def __init__(self, repository: PaymentRepository) -> None:
         self.repository = repository
 
-    def create_zpay_order(
-        self,
-        *,
-        user: UserRow,
-        subject: str,
-        amount: str,
-        pay_type: str,
-    ) -> PaymentOrderRow:
-        settings = load_zpay_settings()
-        normalized_pay_type = normalize_pay_type(pay_type)
-        normalized_subject = normalize_subject(subject)
-        amount_in_cents = amount_cents(amount)
-        order_no = next_order_no()
-        payment_url = build_submit_payment_url(
-            config=settings.config,
-            name=normalized_subject,
-            money=cents_to_money(amount_in_cents),
-            out_trade_no=order_no,
-            notify_url=f"{settings.backend_origin}/api/payments/zpay/notify",
-            return_url=f"{settings.frontend_origin}/payments/return",
-            pay_type=normalized_pay_type,
-            param=f"user_id={user.user_id}",
-        )
-        return self.repository.create_order(
-            PaymentOrderRow(
-                order_no=order_no,
-                user_id=user.id,
-                user_public_id=user.user_id,
-                provider="zpay",
-                subject=normalized_subject,
-                amount_cents=amount_in_cents,
-                pay_type=normalized_pay_type,
-                status="pending",
-                payment_url=payment_url,
-            )
-        )
-
     def create_subscription_zpay_order(
         self,
         *,
@@ -88,7 +51,7 @@ class PaymentService:
 
         settings = load_zpay_settings()
         normalized_pay_type = normalize_pay_type(pay_type)
-        normalized_subject = normalize_subject(plan.name)
+        normalized_subject = normalize_plan_subject(plan)
         order_no = next_order_no()
         payment_url = build_submit_payment_url(
             config=settings.config,
@@ -204,10 +167,10 @@ def normalize_pay_type(pay_type: str) -> str:
     return normalized
 
 
-def normalize_subject(subject: str) -> str:
-    normalized = subject.strip()
+def normalize_plan_subject(plan: SubscriptionPlanRow) -> str:
+    normalized = plan.name.strip()
     if not normalized:
-        raise PaymentServiceError("Payment subject is required.")
+        raise PaymentServiceError("Subscription plan name is required.")
     return normalized[:120]
 
 

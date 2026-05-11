@@ -38,6 +38,8 @@ test("frontend registry exposes only the product image tool with readable labels
   assert.doesNotMatch(toolsSource, /id: "restore"/);
   assert.doesNotMatch(toolsSource, /id: "avatar"/);
   assert.doesNotMatch(toolsSource, /Text to image|Photo restoration|Portrait studio/);
+  assert.doesNotMatch(toolsSource, /export type ImageTool = \{[^}]*description/s);
+  assert.doesNotMatch(toolsSource, /sizeOptions/);
 });
 
 test("tool detail shell is restricted to the product workbench", () => {
