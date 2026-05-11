@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import base64
+import queue
+import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from app.agent_openai import ConversationTurnDecision
 from app.agent_models import AgentMessageRow, ImageVersionRow
@@ -23,6 +26,7 @@ from app.agent_tools import AgentTool, AgentToolContext, AgentToolResult
 
 Planner = Callable[..., ConversationTurnDecision]
 Summarizer = Callable[..., str]
+AgentStreamEvent = dict[str, Any]
 
 
 class AgentServiceError(Exception):
@@ -82,6 +86,42 @@ class ChatGptConversationService:
     ) -> AgentEnvelope:
         return self._send_persistent_message(session_id, message, attachments, size)
 
+    def stream_create_session(
+        self,
+        message: str,
+        attachments: list[dict[str, object]],
+        size: str,
+    ) -> Iterator[AgentStreamEvent]:
+        if not message.strip() and not attachments:
+            raise ConversationInputError("Please enter a message or upload an image.")
+        session = self.repo.create_session(_title_from_message(message))
+        try:
+            yield from self._send_persistent_message_events(
+                session.id,
+                message,
+                attachments,
+                size,
+                emit_session=True,
+            )
+        except Exception:
+            self.repo.delete_session(session.id)
+            raise
+
+    def stream_session_message(
+        self,
+        session_id: str | uuid.UUID,
+        message: str,
+        attachments: list[dict[str, object]],
+        size: str,
+    ) -> Iterator[AgentStreamEvent]:
+        yield from self._send_persistent_message_events(
+            session_id,
+            message,
+            attachments,
+            size,
+            emit_session=False,
+        )
+
     def list_sessions(self) -> ConversationListEnvelope:
         return ConversationListEnvelope(
             sessions=[
@@ -108,6 +148,30 @@ class ChatGptConversationService:
         attachments: list[dict[str, object]],
         size: str,
     ) -> AgentEnvelope:
+        envelope = None
+        for event in self._send_persistent_message_events(
+            session_id,
+            message,
+            attachments,
+            size,
+            emit_session=False,
+            emit_deltas=False,
+        ):
+            if event["event"] == "final":
+                envelope = event["data"]
+        if envelope is None:
+            raise AgentServiceError("Agent did not return a final response.")
+        return AgentEnvelope.model_validate(envelope)
+
+    def _send_persistent_message_events(
+        self,
+        session_id: str | uuid.UUID,
+        message: str,
+        attachments: list[dict[str, object]],
+        size: str,
+        emit_session: bool,
+        emit_deltas: bool = True,
+    ) -> Iterator[AgentStreamEvent]:
         normalized_message = message.strip()
         if not normalized_message and not attachments:
             raise ConversationInputError("Please enter a message or upload an image.")
@@ -124,6 +188,14 @@ class ChatGptConversationService:
         persisted_version_ids: list[uuid.UUID] = []
         persisted_storage_keys: list[str] = []
         try:
+            if emit_session:
+                yield {
+                    "event": "session",
+                    "data": {
+                        "conversation": self._conversation_payload(state),
+                    },
+                }
+
             for attachment in attachments:
                 stored = self.storage.write_image(
                     bytes(attachment["image_bytes"]),
@@ -157,16 +229,30 @@ class ChatGptConversationService:
             if state.messages:
                 self._ensure_message_after(user_message, state.messages[-1])
 
+            yield {
+                "event": "user_message",
+                "data": {
+                    "message": self._message_payload(user_message),
+                },
+            }
+
             state = self._get_persistent_state(parsed_session_id)
             current_version = _current_version(state)
-            decision = self.planner(
-                user_message=normalized_message,
-                summary=state.session.summary,
-                recent_messages=_recent_message_dicts(state.messages),
-                has_current_image=current_version is not None,
-                uploaded_image_count=len(uploaded_versions),
-                previous_response_id=state.session.previous_response_id,
-            )
+
+            planner_kwargs = {
+                "user_message": normalized_message,
+                "summary": state.session.summary,
+                "recent_messages": _recent_message_dicts(state.messages),
+                "has_current_image": current_version is not None,
+                "uploaded_image_count": len(uploaded_versions),
+                "previous_response_id": state.session.previous_response_id,
+            }
+            if emit_deltas:
+                decision = yield from self._run_planner_with_delta_events(
+                    planner_kwargs
+                )
+            else:
+                decision = self.planner(**planner_kwargs)
 
             if decision.action in {"answer", "clarify"}:
                 assistant_message = self.repo.add_message(
@@ -179,12 +265,20 @@ class ChatGptConversationService:
                 self._ensure_message_after(assistant_message, user_message)
                 self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
                 self._maybe_refresh_summary(parsed_session_id)
-                return self.get_session(parsed_session_id)
+                yield {
+                    "event": "final",
+                    "data": self.get_session(parsed_session_id).model_dump(mode="json"),
+                }
+                return
 
             if decision.action == "generate":
                 tool = self.tools.get(decision.tool_name or "")
                 if tool is None:
                     raise AgentServiceError("The selected agent tool is not available.")
+                yield {
+                    "event": "image_generation",
+                    "data": {"action": decision.action, "stage": "generating"},
+                }
                 result = self._execute_image_tool(
                     tool,
                     decision,
@@ -195,6 +289,10 @@ class ChatGptConversationService:
                     ),
                     size,
                 )
+                yield {
+                    "event": "image_generation",
+                    "data": {"action": decision.action, "stage": "saving"},
+                }
                 stored = self.storage.write_image(
                     result.image_bytes,
                     mime_type=result.mime_type,
@@ -226,7 +324,11 @@ class ChatGptConversationService:
                 self._ensure_message_after(assistant_message, user_message)
                 self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
                 self._maybe_refresh_summary(parsed_session_id)
-                return self.get_session(parsed_session_id)
+                yield {
+                    "event": "final",
+                    "data": self.get_session(parsed_session_id).model_dump(mode="json"),
+                }
+                return
 
             if current_version is None:
                 raise ConversationInputError("Please upload an image first.")
@@ -236,6 +338,10 @@ class ChatGptConversationService:
                 raise AgentServiceError("The selected agent tool is not available.")
 
             image_bytes = self.storage.read_image(current_version.storage_key)
+            yield {
+                "event": "image_generation",
+                "data": {"action": decision.action, "stage": "generating"},
+            }
             result = self._execute_image_tool(
                 tool,
                 decision,
@@ -246,6 +352,10 @@ class ChatGptConversationService:
                 ),
                 size,
             )
+            yield {
+                "event": "image_generation",
+                "data": {"action": decision.action, "stage": "saving"},
+            }
             stored = self.storage.write_image(
                 result.image_bytes,
                 mime_type=result.mime_type,
@@ -275,7 +385,11 @@ class ChatGptConversationService:
             self._ensure_message_after(assistant_message, user_message)
             self.repo.set_previous_response_id(parsed_session_id, decision.response_id)
             self._maybe_refresh_summary(parsed_session_id)
-            return self.get_session(parsed_session_id)
+            yield {
+                "event": "final",
+                "data": self.get_session(parsed_session_id).model_dump(mode="json"),
+            }
+            return
         except Exception:
             self._rollback_persistent_turn(
                 session_id=parsed_session_id,
@@ -288,6 +402,69 @@ class ChatGptConversationService:
                 restored_summary_updated_at=restored_summary_updated_at,
             )
             raise
+
+    def _conversation_payload(self, state: AgentSessionState) -> dict[str, object]:
+        return ConversationDto(
+            id=str(state.session.id),
+            title=state.session.title,
+            summary=state.session.summary,
+            previousResponseId=state.session.previous_response_id,
+            status=state.session.status,
+            createdAt=state.session.created_at,
+            updatedAt=state.session.updated_at,
+        ).model_dump(mode="json")
+
+    def _message_payload(self, message: AgentMessageRow) -> dict[str, object]:
+        return ConversationMessageDto(
+            id=str(message.id),
+            role=message.role,
+            content=message.content,
+            attachments=[],
+            responseId=message.response_id,
+            imageVersionId=(
+                str(message.image_version_id)
+                if message.image_version_id is not None
+                else None
+            ),
+            image=None,
+            createdAt=message.created_at,
+        ).model_dump(mode="json")
+
+    def _run_planner_with_delta_events(
+        self,
+        planner_kwargs: dict[str, object],
+    ) -> Iterator[AgentStreamEvent]:
+        event_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+
+        def emit_text_delta(delta: str) -> None:
+            if delta:
+                event_queue.put(("delta", delta))
+
+        def run_planner() -> None:
+            try:
+                decision = self.planner(
+                    **planner_kwargs,
+                    on_text_delta=emit_text_delta,
+                )
+            except Exception as error:
+                event_queue.put(("error", error))
+                return
+            event_queue.put(("decision", decision))
+
+        worker = threading.Thread(target=run_planner, daemon=True)
+        worker.start()
+        while True:
+            event_type, payload = event_queue.get()
+            if event_type == "delta":
+                yield {
+                    "event": "assistant_delta",
+                    "data": {"delta": payload},
+                }
+                continue
+            worker.join()
+            if event_type == "error":
+                raise payload
+            return payload
 
     def _execute_image_tool(
         self,

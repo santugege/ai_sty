@@ -58,6 +58,11 @@ export type AgentEnvelope = {
   error?: string | null;
 };
 
+export type AgentStreamEvent = {
+  event: string;
+  data: Record<string, unknown>;
+};
+
 export async function listAgentSessions(): Promise<ConversationListEnvelope> {
   return readJsonResponse(
     await fetch(`${apiBaseUrl}/api/agent/sessions`, {
@@ -74,6 +79,20 @@ export async function createAgentSession(formData: FormData) {
       credentials: "include",
       body: formData,
     }),
+  );
+}
+
+export async function streamAgentSession(
+  formData: FormData,
+  onEvent: (event: AgentStreamEvent) => void,
+) {
+  return readAgentStream(
+    await fetch(`${apiBaseUrl}/api/agent/sessions/stream`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    }),
+    onEvent,
   );
 }
 
@@ -101,8 +120,84 @@ export async function sendAgentSessionMessage(
   );
 }
 
+export async function streamAgentSessionMessage(
+  sessionId: string,
+  formData: FormData,
+  onEvent: (event: AgentStreamEvent) => void,
+) {
+  const encodedSessionId = encodeURIComponent(sessionId);
+  return readAgentStream(
+    await fetch(
+      `${apiBaseUrl}/api/agent/sessions/${encodedSessionId}/messages/stream`,
+      {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      },
+    ),
+    onEvent,
+  );
+}
+
 async function readAgentResponse(response: Response): Promise<AgentEnvelope> {
   return readJsonResponse<AgentEnvelope>(response);
+}
+
+async function readAgentStream(
+  response: Response,
+  onEvent: (event: AgentStreamEvent) => void,
+) {
+  if (!response.ok || !response.body) {
+    await readJsonResponse(response);
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const frames = buffer.split(/\r?\n\r?\n/);
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const parsed = parseServerSentEvent(frame);
+      if (parsed) {
+        onEvent(parsed);
+      }
+    }
+    if (done) {
+      break;
+    }
+  }
+
+  const trailing = parseServerSentEvent(buffer);
+  if (trailing) {
+    onEvent(trailing);
+  }
+}
+
+function parseServerSentEvent(frame: string): AgentStreamEvent | null {
+  const lines = frame.split(/\r?\n/);
+  const event = lines
+    .find((line) => line.startsWith("event:"))
+    ?.slice("event:".length)
+    .trim();
+  const data = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart())
+    .join("\n");
+
+  if (!event || !data) {
+    return null;
+  }
+
+  const payload = JSON.parse(data) as Record<string, unknown>;
+  if (event === "error") {
+    throw new Error(String(payload.error || "Agent request failed."));
+  }
+  return { event, data: payload };
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {

@@ -128,7 +128,6 @@ test("homepage keeps only the rail and compact product workbench", () => {
   assert.doesNotMatch(productWorkbenchSource, /role="radiogroup"/);
   assert.doesNotMatch(productWorkbenchSource, /role="radio"/);
   assert.doesNotMatch(productWorkbenchSource, /data-option-index/);
-  assert.doesNotMatch(productWorkbenchSource, /type="button"/);
   assert.doesNotMatch(productWorkbenchSource, /generate-slider/);
   assert.doesNotMatch(productWorkbenchSource, /leftStudioRail/);
   assert.doesNotMatch(productWorkbenchSource, /mainStudioStage/);

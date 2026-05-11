@@ -37,6 +37,10 @@ import {
   SubscriptionLimitError,
   type SubscriptionLimitPayload,
 } from "@/lib/image-api";
+import {
+  GeneratedImageActions,
+  ImagePreviewDialog,
+} from "@/components/generated-image-actions";
 
 type ProductWorkbenchProps = {
   tool: ImageTool;
@@ -110,6 +114,7 @@ export function ProductWorkbench({
   const [resultSize, setResultSize] = useState<ImageSize>(tool.defaultSize);
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<GeneratedImage | null>(null);
+  const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
   const [error, setError] = useState("");
   const [subscriptionLimit, setSubscriptionLimit] =
     useState<SubscriptionLimitPayload | null>(null);
@@ -372,6 +377,12 @@ export function ProductWorkbench({
                 )}
               >
                 <div className="flex flex-1 items-center justify-center">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage(result)}
+                      className="block rounded-2xl text-left focus:outline-none focus:ring-2 focus:ring-cyan/40"
+                    >
                   <Image
                     unoptimized
                     src={result.src}
@@ -379,10 +390,17 @@ export function ProductWorkbench({
                     width={previewDimensions.width}
                     height={previewDimensions.height}
                     className={classNames(
-                      "w-auto max-w-full rounded-2xl border border-border object-contain shadow-refined",
+                      "w-auto max-w-full rounded-2xl border border-border object-contain shadow-refined transition-refined hover:brightness-95",
                       isCompact ? "max-h-[44vh]" : "max-h-[68vh]",
                     )}
                   />
+                    </button>
+                    <GeneratedImageActions
+                      image={result}
+                      onPreview={() => setPreviewImage(result)}
+                      downloadName={`product-image-${resultSize}`}
+                    />
+                  </div>
                 </div>
                 {result.revisedPrompt && (
                   <div
@@ -575,6 +593,12 @@ export function ProductWorkbench({
           </section>
         </div>
       ) : null}
+      <ImagePreviewDialog
+        image={previewImage}
+        alt="电商商品图生成结果"
+        onClose={() => setPreviewImage(null)}
+        downloadName={`product-image-${resultSize}`}
+      />
     </div>
   );
 }

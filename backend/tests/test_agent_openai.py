@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent_openai import (
+    request_conversation_turn_stream,
     request_conversation_summary,
     request_conversation_turn,
 )
@@ -118,6 +119,56 @@ def test_request_conversation_turn_includes_summary_in_model_context():
 
     payload = json.loads(calls[0]["input"][1]["content"])
     assert payload["summary"] == "User prefers clean white backgrounds."
+
+
+def test_request_conversation_turn_requests_structured_json_output():
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                id="resp_structured",
+                output_text=(
+                    '{"action":"generate","assistant_message":"I will create it.",'
+                    '"tool_name":"chatgpt_image_generate",'
+                    '"tool_instruction":{'
+                    '"user_goal":"Create a calm mountain lake.",'
+                    '"scene":"Mountain lake at sunrise",'
+                    '"subject":"A still lake",'
+                    '"style":"Photorealistic",'
+                    '"composition":"Wide landscape",'
+                    '"lighting":"Soft sunrise",'
+                    '"preserve":[],"change":[],"avoid":["watermark"]'
+                    "}}"
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    request_conversation_turn(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Generate a sunrise lake.",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    text_config = calls[0]["text"]
+    assert text_config["format"]["type"] == "json_schema"
+    assert text_config["format"]["name"] == "chatgpt_conversation_turn"
+    assert text_config["format"]["strict"] is True
+    assert text_config["format"]["schema"]["required"] == [
+        "action",
+        "assistant_message",
+        "tool_name",
+        "tool_instruction",
+    ]
 
 
 def test_request_conversation_turn_accepts_raw_json_string_response():
@@ -403,3 +454,121 @@ def test_request_conversation_turn_uses_chatgpt_general_prompt_without_product_t
     assert "Pinduoduo" not in system_prompt
     assert "Taobao" not in system_prompt
     assert "selling point" not in system_prompt
+
+
+def test_request_conversation_turn_stream_emits_text_deltas_and_final_decision():
+    deltas = []
+
+    class FakeEvent:
+        def __init__(self, event_type, delta=None):
+            self.type = event_type
+            self.delta = delta
+
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def __iter__(self):
+            return iter(
+                [
+                    FakeEvent("response.output_text.delta", '{"action":"answer",'),
+                    FakeEvent(
+                        "response.output_text.delta",
+                        '"assistant_message":"Streaming hello.",',
+                    ),
+                    FakeEvent(
+                        "response.output_text.delta",
+                        '"tool_name":null,"tool_instruction":null}',
+                    ),
+                ]
+            )
+
+        def get_final_response(self):
+            return SimpleNamespace(
+                id="resp_stream",
+                output_text=(
+                    '{"action":"answer","assistant_message":"Streaming hello.",'
+                    '"tool_name":null,"tool_instruction":null}'
+                ),
+            )
+
+    class FakeResponses:
+        def stream(self, **kwargs):
+            return FakeStream()
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    decision = request_conversation_turn_stream(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Hello",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        client_factory=FakeClient,
+        on_text_delta=deltas.append,
+    )
+
+    assert "".join(deltas) == "Streaming hello."
+    assert decision.assistant_message == "Streaming hello."
+    assert decision.response_id == "resp_stream"
+
+
+def test_request_conversation_turn_stream_parses_accumulated_text_when_final_output_is_empty():
+    class FakeEvent:
+        def __init__(self, event_type, delta=None):
+            self.type = event_type
+            self.delta = delta
+
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def __iter__(self):
+            return iter(
+                [
+                    FakeEvent("response.output_text.delta", '{"action":"answer",'),
+                    FakeEvent(
+                        "response.output_text.delta",
+                        '"assistant_message":"Recovered from stream.",',
+                    ),
+                    FakeEvent(
+                        "response.output_text.delta",
+                        '"tool_name":null,"tool_instruction":null}',
+                    ),
+                ]
+            )
+
+        def get_final_response(self):
+            return SimpleNamespace(id="resp_empty_final", output_text="")
+
+    class FakeResponses:
+        def stream(self, **kwargs):
+            return FakeStream()
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    decision = request_conversation_turn_stream(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Hello",
+        recent_messages=[],
+        has_current_image=False,
+        uploaded_image_count=0,
+        previous_response_id=None,
+        client_factory=FakeClient,
+    )
+
+    assert decision.assistant_message == "Recovered from stream."
+    assert decision.response_id == "resp_empty_final"

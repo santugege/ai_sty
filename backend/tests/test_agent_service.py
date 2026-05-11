@@ -1,4 +1,5 @@
 import uuid
+import threading
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,56 @@ class FakeTool:
             mime_type="image/png",
             prompt=context.instruction,
             revised_prompt="edited prompt",
+            model="gpt-image-2",
+        )
+
+
+class SequencedTool:
+    name = "chatgpt_image_generate"
+    description = "sequenced fake"
+
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, context: AgentToolContext) -> AgentToolResult:
+        call_number = len(self.calls) + 1
+        self.calls.append(context)
+        return AgentToolResult(
+            image_bytes=f"generated-image-{call_number}".encode("ascii"),
+            mime_type="image/png",
+            prompt=context.instruction,
+            revised_prompt=f"generated prompt {call_number}",
+            model="gpt-image-2",
+        )
+
+
+class ConcurrentTool:
+    name = "chatgpt_image_generate"
+    description = "concurrent fake"
+
+    def __init__(self, expected_calls: int):
+        self.expected_calls = expected_calls
+        self.calls = []
+        self.started = 0
+        self.lock = threading.Lock()
+        self.all_started = threading.Event()
+        self.release = threading.Event()
+
+    def execute(self, context: AgentToolContext) -> AgentToolResult:
+        with self.lock:
+            self.started += 1
+            call_number = self.started
+            self.calls.append(context)
+            if self.started == self.expected_calls:
+                self.all_started.set()
+        assert self.all_started.wait(timeout=1), "image calls did not start together"
+        self.release.set()
+        assert self.release.wait(timeout=1)
+        return AgentToolResult(
+            image_bytes=f"parallel-image-{call_number}".encode("ascii"),
+            mime_type="image/png",
+            prompt=context.instruction,
+            revised_prompt=None,
             model="gpt-image-2",
         )
 
@@ -181,6 +232,102 @@ def test_create_session_persists_conversation_and_uploaded_image():
     assert len(storage.objects) == 1
     assert state.session.current_version_id == state.versions[0].id
     assert envelope.messages[0].imageVersionId == str(state.versions[0].id)
+
+
+def test_stream_create_session_emits_session_user_delta_and_final_events():
+    def streaming_planner(**kwargs):
+        kwargs["on_text_delta"]("Streaming ")
+        kwargs["on_text_delta"]("answer")
+        return ConversationTurnDecision(
+            action="answer",
+            assistant_message="Streaming answer",
+            tool_name=None,
+            tool_instruction=None,
+            response_id="resp_stream",
+        )
+
+    service = ChatGptConversationService(
+        planner=streaming_planner,
+        tools={"chatgpt_image_edit": FakeTool()},
+        repo=make_repo(),
+        storage=FakeImageStorage(),
+    )
+
+    events = list(service.stream_create_session("Hello", [], "1536x1024"))
+
+    assert [event["event"] for event in events] == [
+        "session",
+        "user_message",
+        "assistant_delta",
+        "assistant_delta",
+        "final",
+    ]
+    assert events[0]["data"]["conversation"]["title"] == "Hello"
+    assert events[1]["data"]["message"]["role"] == "user"
+    assert events[2]["data"]["delta"] == "Streaming "
+    assert events[3]["data"]["delta"] == "answer"
+    assert events[-1]["data"]["messages"][-1]["content"] == "Streaming answer"
+
+
+def test_stream_create_session_yields_assistant_delta_before_planner_finishes():
+    release_planner = threading.Event()
+
+    def streaming_planner(**kwargs):
+        kwargs["on_text_delta"]("early")
+        assert release_planner.wait(timeout=1)
+        return ConversationTurnDecision(
+            action="answer",
+            assistant_message="early final",
+            tool_name=None,
+            tool_instruction=None,
+            response_id="resp_stream",
+        )
+
+    service = ChatGptConversationService(
+        planner=streaming_planner,
+        tools={"chatgpt_image_edit": FakeTool()},
+        repo=make_repo(),
+        storage=FakeImageStorage(),
+    )
+
+    events = service.stream_create_session("Hello", [], "1536x1024")
+
+    assert next(events)["event"] == "session"
+    assert next(events)["event"] == "user_message"
+    early_event = next(events)
+
+    assert early_event == {"event": "assistant_delta", "data": {"delta": "early"}}
+    release_planner.set()
+    assert list(events)[-1]["event"] == "final"
+
+
+def test_stream_generate_turn_emits_image_progress_before_final():
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="generate",
+            assistant_message="I created it.",
+            tool_name="chatgpt_image_generate",
+            tool_instruction="Create a mountain lake.",
+            response_id="resp_generate",
+        )
+    )
+
+    events = list(
+        service.stream_create_session(
+            "Generate a mountain lake.",
+            [],
+            "1536x1024",
+        )
+    )
+
+    progress_events = [
+        event["data"]["stage"]
+        for event in events
+        if event["event"] == "image_generation"
+    ]
+    assert progress_events == ["generating", "saving"]
+    assert events[-1]["event"] == "final"
+    assert events[-1]["data"]["messages"][-1]["image"] is not None
 
 
 def test_create_session_rejects_blank_input_without_persisting_session():
@@ -530,6 +677,131 @@ def test_persistent_generate_turn_does_not_require_current_image():
     assistant_message = envelope.messages[-1]
     assert assistant_message.image is not None
     assert assistant_message.image.prompt == "Create a mountain lake."
+
+
+def test_persistent_generate_turn_splits_requested_multiple_images():
+    service, _planner_calls, tool, storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="generate",
+            assistant_message="I created two versions.",
+            tool_name="chatgpt_image_generate",
+            tool_instruction="Create two different mountain lake compositions.",
+            response_id="resp_generate",
+        ),
+        tool=SequencedTool(),
+    )
+
+    envelope = service.create_session(
+        message="请生成两张不同构图的山湖图。",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    state = service.repo.get_session_state(uuid.UUID(envelope.conversation.id))
+    assert state is not None
+    assert len(tool.calls) == 2
+    assert [call.image_bytes for call in tool.calls] == [b"", b""]
+    assert "Standalone output 1 of 2" in tool.calls[0].instruction
+    assert "Standalone output 2 of 2" in tool.calls[1].instruction
+    assert "Do not create a collage" in tool.calls[0].instruction
+    assert len(state.versions) == 2
+    assert state.session.current_version_id == state.versions[-1].id
+    assert state.messages[-1].image_version_id == state.versions[-1].id
+    assert state.message_image_versions[state.messages[-1].id] == [
+        version.id for version in state.versions
+    ]
+    assert storage.read_image(state.versions[0].storage_key) == b"generated-image-1"
+    assert storage.read_image(state.versions[1].storage_key) == b"generated-image-2"
+
+    assistant_message = envelope.messages[-1]
+    assert assistant_message.imageVersionId == str(state.versions[-1].id)
+    assert assistant_message.image is not None
+    assert assistant_message.image.id == str(state.versions[-1].id)
+    assert len(assistant_message.images) == 2
+    assert [image.id for image in assistant_message.images] == [
+        str(version.id) for version in state.versions
+    ]
+    assert assistant_message.images[0].src.endswith("Z2VuZXJhdGVkLWltYWdlLTE=")
+    assert assistant_message.images[1].src.endswith("Z2VuZXJhdGVkLWltYWdlLTI=")
+
+
+def test_persistent_edit_turn_splits_requested_multiple_images_from_current_image():
+    service, _planner_calls, tool, _storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "Ready.", None, None, "resp_1"),
+            ConversationTurnDecision(
+                action="edit",
+                assistant_message="I created two poses.",
+                tool_name="chatgpt_image_edit",
+                tool_instruction="Create two different martial arts poses.",
+                response_id="resp_2",
+            ),
+        ],
+        tool=SequencedTool(),
+    )
+    envelope = service.create_session(
+        "Use this character.",
+        [
+            {
+                "image_bytes": b"input-image",
+                "image_name": "character.png",
+                "mime_type": "image/png",
+            }
+        ],
+        "1536x1024",
+    )
+
+    updated = service.send_session_message(
+        session_id=envelope.conversation.id,
+        message="帮我生成两张不同的姿势。",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    state = service.repo.get_session_state(uuid.UUID(envelope.conversation.id))
+    assert state is not None
+    assert len(tool.calls) == 2
+    assert [call.image_bytes for call in tool.calls] == [b"input-image", b"input-image"]
+    assert "Standalone output 1 of 2" in tool.calls[0].instruction
+    assert "Standalone output 2 of 2" in tool.calls[1].instruction
+    assert len(state.versions) == 3
+    generated_versions = state.versions[-2:]
+    assert [version.parent_version_id for version in generated_versions] == [
+        state.versions[0].id,
+        state.versions[0].id,
+    ]
+    assert state.session.current_version_id == generated_versions[-1].id
+    assistant_message = updated.messages[-1]
+    assert len(assistant_message.images) == 2
+    assert [image.id for image in assistant_message.images] == [
+        str(version.id) for version in generated_versions
+    ]
+
+
+def test_persistent_generate_turn_starts_multiple_image_calls_concurrently():
+    tool = ConcurrentTool(expected_calls=4)
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="generate",
+            assistant_message="I created four versions.",
+            tool_name="chatgpt_image_generate",
+            tool_instruction="Create four different product concepts.",
+            response_id="resp_generate",
+        ),
+        tool=tool,
+    )
+
+    envelope = service.create_session(
+        message="生成4张不同风格的产品概念图。",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    state = service.repo.get_session_state(uuid.UUID(envelope.conversation.id))
+    assert state is not None
+    assert len(tool.calls) == 4
+    assert len(state.versions) == 4
+    assert len(envelope.messages[-1].images) == 4
 
 
 def test_failed_persistent_edit_with_unavailable_tool_rolls_back_upload_side_effects():

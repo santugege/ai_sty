@@ -300,6 +300,40 @@ def test_create_session_route_accepts_message_size_and_multiple_images(
     ]
 
 
+def test_create_session_stream_route_returns_server_sent_events(
+    monkeypatch, authenticated_user
+):
+    db = object()
+
+    class FakeService:
+        def stream_create_session(self, message, attachments, size):
+            assert message == "stream this"
+            assert attachments == []
+            assert size == "1024x1024"
+            yield {"event": "assistant_delta", "data": {"delta": "Hello"}}
+            yield {
+                "event": "final",
+                "data": {"conversation": {"id": "session-1"}, "messages": []},
+            }
+
+    override_db_session(db)
+    monkeypatch.setattr(
+        app_main, "build_agent_service", lambda session: FakeService(), raising=False
+    )
+    try:
+        response = client.post(
+            "/api/agent/sessions/stream",
+            data={"message": "stream this", "size": "1024x1024"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert 'event: assistant_delta\ndata: {"delta":"Hello"}' in response.text
+    assert 'event: final\ndata: {"conversation":{"id":"session-1"},"messages":[]}' in response.text
+
+
 def test_list_sessions_route_returns_service_json(monkeypatch, authenticated_user):
     db = object()
     build_calls = []

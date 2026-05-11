@@ -48,7 +48,11 @@ test("agent api client uses persisted session routes", () => {
   assert.match(source, /createAgentSession/);
   assert.match(source, /getAgentSession/);
   assert.match(source, /sendAgentSessionMessage/);
+  assert.match(source, /streamAgentSession/);
+  assert.match(source, /streamAgentSessionMessage/);
   assert.match(source, /\/api\/agent\/sessions/);
+  assert.match(source, /\/api\/agent\/sessions\/stream/);
+  assert.match(source, /\/messages\/stream/);
   assert.match(source, /imageVersionId\?: string \| null/);
   assert.match(source, /image\?: ConversationImage \| null/);
   assert.doesNotMatch(source, /currentImage\?:/);
@@ -111,6 +115,58 @@ test("agent api client encodes session ids in persisted routes", async (t) => {
   ]);
 });
 
+test("agent api client parses server-sent stream events", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      method: init?.method,
+      credentials: init?.credentials,
+    });
+    return new Response(
+      [
+        "event: assistant_delta",
+        'data: {"delta":"Hel"}',
+        "",
+        "event: assistant_delta",
+        'data: {"delta":"lo"}',
+        "",
+        "event: final",
+        `data: ${JSON.stringify(successEnvelope)}`,
+        "",
+      ].join("\n"),
+      {
+        headers: { "content-type": "text/event-stream" },
+        status: 200,
+      },
+    );
+  };
+
+  const { streamAgentSession } = await importAgentApiClient();
+  const events = [];
+  await streamAgentSession(new FormData(), (event) => events.push(event));
+
+  assert.deepEqual(calls, [
+    {
+      url: "http://localhost:8000/api/agent/sessions/stream",
+      method: "POST",
+      credentials: "include",
+    },
+  ]);
+  assert.deepEqual(events.map((event) => event.event), [
+    "assistant_delta",
+    "assistant_delta",
+    "final",
+  ]);
+  assert.equal(events[0].data.delta, "Hel");
+  assert.equal(events[1].data.delta, "lo");
+  assert.equal(events[2].data.conversation.id, "session-1");
+});
+
 test("agent workbench renders session list and sends to active session", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
@@ -118,6 +174,8 @@ test("agent workbench renders session list and sends to active session", () => {
   assert.match(source, /getAgentSession/);
   assert.match(source, /createAgentSession/);
   assert.match(source, /sendAgentSessionMessage/);
+  assert.match(source, /streamAgentSession/);
+  assert.match(source, /streamAgentSessionMessage/);
   assert.match(source, /sessions\.map/);
   assert.match(source, /activeSessionId/);
   assert.match(source, /New conversation|新会话/);
@@ -180,8 +238,21 @@ test("agent workbench shows receiving state in the message stream after submit",
   assert.match(source, /setIsAwaitingAgentResponse\(true\)/);
   assert.match(source, /setIsAwaitingAgentResponse\(false\)/);
   assert.match(source, /ReceivingBubble/);
-  assert.match(source, /正在接收回复/);
+  assert.match(source, /生成图片/);
   assert.doesNotMatch(source, /Loader2/);
+});
+
+test("agent workbench rotates frontend-only generation status copy", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /agentLoadingPhrases/);
+  assert.match(source, /生成图片/);
+  assert.match(source, /添加细节/);
+  assert.match(source, /润色画面/);
+  assert.match(source, /保存图片/);
+  assert.match(source, /setLoadingPhraseIndex/);
+  assert.match(source, /window\.setInterval/);
+  assert.match(source, /ReceivingBubble phrase=\{agentLoadingPhrases\[loadingPhraseIndex\]\}/);
 });
 
 test("agent workbench keeps internal summaries out of the session list", () => {
@@ -195,12 +266,39 @@ test("agent workbench keeps internal summaries out of the session list", () => {
   assert.doesNotMatch(sessionListMarkup, /session\.summary/);
 });
 
+test("agent workbench appends streamed assistant deltas before final envelope", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /streamingAssistantMessage/);
+  assert.match(source, /createStreamingAssistantMessage/);
+  assert.match(source, /appendAssistantDelta/);
+  assert.match(source, /assistant_delta/);
+  assert.match(source, /setStreamingAssistantMessage/);
+  assert.match(source, /streamingAssistantMessage && \([\s\S]*<MessageBubble/);
+});
+
 test("agent workbench does not render a dedicated current image context panel", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
   assert.doesNotMatch(source, /currentImage/);
-  assert.doesNotMatch(source, /ConversationImage/);
   assert.doesNotMatch(source, /max-h-56/);
+});
+
+test("agent generated images can be previewed and downloaded", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+  const actionsSource = readFileSync(
+    "src/components/generated-image-actions.tsx",
+    "utf8",
+  );
+
+  assert.match(source, /ImagePreviewDialog/);
+  assert.match(source, /GeneratedImageActions/);
+  assert.match(source, /setPreviewImage/);
+  assert.match(source, /onPreviewImage/);
+  assert.match(actionsSource, /Download/);
+  assert.match(actionsSource, /ExternalLink/);
+  assert.match(actionsSource, /download=/);
+  assert.match(actionsSource, /href=\{image\.src\}/);
 });
 
 test("agent route renders the workbench", () => {
@@ -224,6 +322,18 @@ test("agent workbench supports embedded compact shell styling", () => {
   assert.match(source, /bg-surface/);
   assert.doesNotMatch(source, /bg-\[#f7f7f4\]/);
   assert.doesNotMatch(source, /border-\[#deded8\]/);
+});
+
+test("agent workbench keeps the chat pane flush with the session list", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+  const chatPaneMarkup = source.slice(
+    source.indexOf("flex w-full flex-col"),
+    source.indexOf("<header className"),
+  );
+
+  assert.match(chatPaneMarkup, /flex w-full flex-col/);
+  assert.equal(chatPaneMarkup.includes("max-w-5xl"), false);
+  assert.equal(chatPaneMarkup.includes("mx-auto"), false);
 });
 
 test("homepage labels the agent route as ChatGPT-style conversation", () => {

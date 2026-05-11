@@ -12,6 +12,10 @@ const productWorkbenchSource = readFileSync(
   new URL("../src/components/product-workbench.tsx", import.meta.url),
   "utf8",
 );
+const generatedImageActionsSource = readFileSync(
+  new URL("../src/components/generated-image-actions.tsx", import.meta.url),
+  "utf8",
+);
 const nextConfigSource = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
 const toolCardPath = new URL("../src/components/tool-card.tsx", import.meta.url);
 const toolFormPath = new URL("../src/components/tool-form.tsx", import.meta.url);
@@ -106,6 +110,17 @@ test("product detail workbench supports required upload and prompt preview workf
   assert.doesNotMatch(productWorkbenchSource, /Additional Directives/);
   assert.doesNotMatch(productWorkbenchSource, /Key Selling Points/);
   assert.doesNotMatch(productWorkbenchSource, /Product Category/);
+});
+
+test("product generated image result supports preview and download actions", () => {
+  assert.match(productWorkbenchSource, /ImagePreviewDialog/);
+  assert.match(productWorkbenchSource, /GeneratedImageActions/);
+  assert.match(productWorkbenchSource, /setPreviewImage/);
+  assert.match(productWorkbenchSource, /onPreview=\{\(\) => setPreviewImage\(result\)\}/);
+  assert.match(generatedImageActionsSource, /Download/);
+  assert.match(generatedImageActionsSource, /ExternalLink/);
+  assert.match(generatedImageActionsSource, /download=/);
+  assert.match(generatedImageActionsSource, /href=\{image\.src\}/);
 });
 
 test("development preview hides the Next.js indicator for screenshot parity", () => {

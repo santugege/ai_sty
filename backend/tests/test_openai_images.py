@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -240,3 +241,63 @@ def test_requests_multiple_images_by_repeating_single_image_generation():
     ]
     assert len(fake_client.images.generate_kwargs) == 4
     assert fake_client.images.edit_kwargs is None
+
+
+def test_requests_multiple_images_concurrently():
+    started = 0
+    lock = threading.Lock()
+    all_started = threading.Event()
+    release = threading.Event()
+
+    class FakeImages:
+        def __init__(self):
+            self.generate_kwargs = []
+
+        def generate(self, **kwargs):
+            nonlocal started
+            with lock:
+                started += 1
+                call_number = started
+                self.generate_kwargs.append(kwargs)
+                if started == 4:
+                    all_started.set()
+            assert release.wait(timeout=1), "image calls did not run concurrently"
+            return {"data": [{"b64_json": f"parallel-{call_number}"}]}
+
+    class FakeClient:
+        def __init__(self):
+            self.images = FakeImages()
+
+    fake_client = FakeClient()
+    result_holder = {}
+
+    def run_request():
+        result_holder["result"] = request_image_from_openai(
+            ValidImageRequest(
+                tool=get_tool_by_id("product"),
+                prompt="generate four variants",
+                size="1024x1024",
+                generation_settings=ProductGenerationSettings(
+                    aspect_ratio="1:1",
+                    image_count=4,
+                ),
+            ),
+            api_key="key",
+            model="gpt-image-2",
+            client_factory=lambda api_key: fake_client,
+        )
+
+    worker = threading.Thread(target=run_request)
+    worker.start()
+    assert all_started.wait(timeout=1), "not all image requests started together"
+    release.set()
+    worker.join(timeout=1)
+
+    assert not worker.is_alive()
+    assert [image.src for image in result_holder["result"].images] == [
+        "data:image/png;base64,parallel-1",
+        "data:image/png;base64,parallel-2",
+        "data:image/png;base64,parallel-3",
+        "data:image/png;base64,parallel-4",
+    ]
+    assert len(fake_client.images.generate_kwargs) == 4

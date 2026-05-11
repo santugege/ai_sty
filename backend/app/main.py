@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -18,7 +19,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -26,7 +27,11 @@ from starlette.concurrency import run_in_threadpool
 
 from app.account_repository import AccountRepository
 from app.account_service import AccountService, AccountServiceError, user_to_dto
-from app.agent_openai import request_conversation_summary, request_conversation_turn
+from app.agent_openai import (
+    request_conversation_summary,
+    request_conversation_turn,
+    request_conversation_turn_stream,
+)
 from app.agent_repository import AgentRepository
 from app.agent_service import (
     AgentInputError,
@@ -175,7 +180,12 @@ def build_agent_service(db: Session) -> ChatGptConversationService:
     )
 
     def planner(**kwargs):
-        return request_conversation_turn(
+        planner_func = (
+            request_conversation_turn_stream
+            if kwargs.get("on_text_delta") is not None
+            else request_conversation_turn
+        )
+        return planner_func(
             api_key=require_openai_api_key(api_key),
             agent_model=agent_model,
             base_url=base_url,
@@ -264,6 +274,33 @@ def agent_error_response(error: Exception) -> JSONResponse:
         return JSONResponse({"error": str(error)}, status_code=error.status_code)
 
     return JSONResponse({"error": "Agent request failed."}, status_code=500)
+
+
+def agent_public_error_message(error: Exception) -> str:
+    if isinstance(error, AgentInputError):
+        return str(error)
+    if isinstance(error, ImageRequestError):
+        return error.message
+    if isinstance(error, AgentServiceError):
+        return str(error)
+    logger.exception("Agent stream failed")
+    return "Agent request failed."
+
+
+def sse_event_stream(events):
+    try:
+        for event in events:
+            event_name = str(event.get("event") or "message")
+            data = event.get("data")
+            yield (
+                f"event: {event_name}\n"
+                f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            )
+    except Exception as error:
+        yield (
+            "event: error\n"
+            f"data: {json.dumps({'error': agent_public_error_message(error)}, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        )
 
 
 def payment_error_response(error: PaymentServiceError) -> JSONResponse:
@@ -612,6 +649,31 @@ async def create_agent_session(
         return agent_error_response(error)
 
 
+@app.post("/api/agent/sessions/stream")
+async def create_agent_session_stream(
+    message: str = Form(""),
+    size: str = Form("1536x1024"),
+    images: list[UploadFile] | None = File(None),
+    _current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        attachments = await read_conversation_uploads(images)
+        service = build_agent_service(db)
+        return StreamingResponse(
+            sse_event_stream(
+                service.stream_create_session(
+                    message=message,
+                    attachments=attachments,
+                    size=size,
+                )
+            ),
+            media_type="text/event-stream",
+        )
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
 @app.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(
     session_id: UUID,
@@ -643,6 +705,33 @@ async def send_agent_session_message(
             size=size,
         )
         return envelope.model_dump(mode="json")
+    except (AgentInputError, AgentServiceError, Exception) as error:
+        return agent_error_response(error)
+
+
+@app.post("/api/agent/sessions/{session_id}/messages/stream")
+async def send_agent_session_message_stream(
+    session_id: UUID,
+    message: str = Form(""),
+    size: str = Form("1536x1024"),
+    images: list[UploadFile] | None = File(None),
+    _current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        attachments = await read_conversation_uploads(images)
+        service = build_agent_service(db)
+        return StreamingResponse(
+            sse_event_stream(
+                service.stream_session_message(
+                    session_id,
+                    message=message,
+                    attachments=attachments,
+                    size=size,
+                )
+            ),
+            media_type="text/event-stream",
+        )
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import Any, Callable
 
@@ -37,10 +38,17 @@ def request_image_from_openai(
         request.generation_settings,
     )
 
-    images = [
-        request_single_image(client, request, model, prompt)
-        for _ in range(request.generation_settings.image_count)
-    ]
+    image_count = request.generation_settings.image_count
+    if image_count <= 1:
+        images = [request_single_image(client, request, model, prompt)]
+    else:
+        with ThreadPoolExecutor(max_workers=image_count) as executor:
+            images = list(
+                executor.map(
+                    lambda _index: request_single_image(client, request, model, prompt),
+                    range(image_count),
+                )
+            )
     return GeneratedImageEnvelope(images=images)
 
 

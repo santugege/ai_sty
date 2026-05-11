@@ -21,10 +21,18 @@ import {
   getAgentSession,
   listAgentSessions,
   sendAgentSessionMessage,
+  streamAgentSession,
+  streamAgentSessionMessage,
   type AgentEnvelope,
+  type AgentStreamEvent,
   type ConversationListItem,
+  type ConversationImage,
   type ConversationMessage,
 } from "@/lib/agent-api";
+import {
+  GeneratedImageActions,
+  ImagePreviewDialog,
+} from "@/components/generated-image-actions";
 
 const imageSizes = ["1024x1024", "1536x1024", "1024x1536"] as const;
 
@@ -39,6 +47,8 @@ type SelectedImage = {
   file: File;
   previewUrl: string;
 };
+
+const agentLoadingPhrases = ["生成图片", "添加细节", "润色画面", "保存图片"] as const;
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -79,6 +89,30 @@ function createPendingUserMessage(
   };
 }
 
+function createStreamingAssistantMessage(): ConversationMessage {
+  return {
+    id: `streaming-assistant-${crypto.randomUUID()}`,
+    role: "assistant",
+    content: "",
+    attachments: [],
+    responseId: null,
+    imageVersionId: null,
+    image: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function appendAssistantDelta(
+  message: ConversationMessage | null,
+  delta: string,
+): ConversationMessage {
+  const baseMessage = message ?? createStreamingAssistantMessage();
+  return {
+    ...baseMessage,
+    content: `${baseMessage.content}${delta}`,
+  };
+}
+
 export function AgentImageWorkbench({
   variant = "full",
 }: AgentImageWorkbenchProps) {
@@ -94,11 +128,15 @@ export function AgentImageWorkbench({
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [pendingUserMessage, setPendingUserMessage] =
     useState<ConversationMessage | null>(null);
+  const [streamingAssistantMessage, setStreamingAssistantMessage] =
+    useState<ConversationMessage | null>(null);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [size, setSize] = useState<(typeof imageSizes)[number]>("1536x1024");
+  const [previewImage, setPreviewImage] = useState<ConversationImage | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAwaitingAgentResponse, setIsAwaitingAgentResponse] = useState(false);
+  const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
 
   const canSubmit =
     !isSubmitting && (message.trim().length > 0 || selectedImages.length > 0);
@@ -114,6 +152,7 @@ export function AgentImageWorkbench({
 
   function applyEnvelope(envelope: AgentEnvelope) {
     setPendingUserMessage(null);
+    setStreamingAssistantMessage(null);
     setMessages(envelope.messages);
   }
 
@@ -185,6 +224,20 @@ export function AgentImageWorkbench({
     return () => revokeSelectedImages(selectedImagesRef.current);
   }, []);
 
+  useEffect(() => {
+    if (!isAwaitingAgentResponse) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setLoadingPhraseIndex(
+        (currentIndex) => (currentIndex + 1) % agentLoadingPhrases.length,
+      );
+    }, 1400);
+
+    return () => window.clearInterval(timer);
+  }, [isAwaitingAgentResponse]);
+
   function handleImages(files: FileList | null) {
     const nextImages = Array.from(files ?? []).map((file) => ({
       id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
@@ -221,6 +274,7 @@ export function AgentImageWorkbench({
     setError("");
     setActiveSessionId(sessionId);
     setPendingUserMessage(null);
+    setStreamingAssistantMessage(null);
     clearDraft();
     setIsSubmitting(true);
     try {
@@ -244,11 +298,13 @@ export function AgentImageWorkbench({
     clearDraft();
     setActiveSessionId(null);
     setPendingUserMessage(null);
+    setStreamingAssistantMessage(null);
     setMessages([]);
     setError("");
     setIsLoadingSessions(false);
     setIsSubmitting(false);
     setIsAwaitingAgentResponse(false);
+    setLoadingPhraseIndex(0);
   }
 
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
@@ -267,38 +323,84 @@ export function AgentImageWorkbench({
     setError("");
     setIsSubmitting(true);
     setIsAwaitingAgentResponse(true);
+    setLoadingPhraseIndex(0);
     setPendingUserMessage(createPendingUserMessage(draftMessage, draftImages));
+    setStreamingAssistantMessage(null);
     clearDraft(draftImages, false);
     const requestId = beginRequest();
 
     try {
-      const envelope = activeSessionId
-        ? await sendAgentSessionMessage(activeSessionId, formData)
-        : await createAgentSession(formData);
+      let envelope: AgentEnvelope | null = null;
+      const handleStreamEvent = (streamEvent: AgentStreamEvent) => {
+        if (!isCurrentRequest(requestId)) {
+          return;
+        }
+        if (streamEvent.event === "session") {
+          const conversation = streamEvent.data.conversation as
+            | AgentEnvelope["conversation"]
+            | undefined;
+          if (conversation?.id) {
+            setActiveSessionId(conversation.id);
+          }
+          return;
+        }
+        if (streamEvent.event === "assistant_delta") {
+          const delta =
+            typeof streamEvent.data.delta === "string"
+              ? streamEvent.data.delta
+              : "";
+          setStreamingAssistantMessage((current) =>
+            appendAssistantDelta(current, delta),
+          );
+          return;
+        }
+        if (
+          streamEvent.event === "image_generation" ||
+          streamEvent.event === "image_started"
+        ) {
+          setIsAwaitingAgentResponse(true);
+          return;
+        }
+        if (streamEvent.event === "final") {
+          envelope = streamEvent.data as AgentEnvelope;
+        }
+      };
+
+      if (activeSessionId) {
+        await streamAgentSessionMessage(activeSessionId, formData, handleStreamEvent);
+      } else {
+        await streamAgentSession(formData, handleStreamEvent);
+      }
+      if (!envelope) {
+        envelope = activeSessionId
+          ? await sendAgentSessionMessage(activeSessionId, formData)
+          : await createAgentSession(formData);
+      }
       if (!isCurrentRequest(requestId)) {
         return;
       }
+      const finalEnvelope = envelope;
       revokeSelectedImages(draftImages);
-      applyEnvelope(envelope);
-      setActiveSessionId(envelope.conversation.id);
+      applyEnvelope(finalEnvelope);
+      setActiveSessionId(finalEnvelope.conversation.id);
       try {
-        await refreshSessions(envelope.conversation.id, requestId);
+        await refreshSessions(finalEnvelope.conversation.id, requestId);
       } catch (refreshError) {
         if (!isCurrentRequest(requestId)) {
           return;
         }
         setIsLoadingSessions(false);
         setSessions((previous) =>
-          previous.some((session) => session.id === envelope.conversation.id)
+          previous.some((session) => session.id === finalEnvelope.conversation.id)
             ? previous
             : [
                 {
-                  id: envelope.conversation.id,
-                  title: envelope.conversation.title,
-                  summary: envelope.conversation.summary,
-                  status: envelope.conversation.status,
-                  createdAt: envelope.conversation.createdAt,
-                  updatedAt: envelope.conversation.updatedAt,
+                  id: finalEnvelope.conversation.id,
+                  title: finalEnvelope.conversation.title,
+                  summary: finalEnvelope.conversation.summary,
+                  status: finalEnvelope.conversation.status,
+                  createdAt: finalEnvelope.conversation.createdAt,
+                  updatedAt: finalEnvelope.conversation.updatedAt,
                 },
                 ...previous,
               ],
@@ -315,6 +417,7 @@ export function AgentImageWorkbench({
         setMessage(draftMessage);
         setSelectedImages(draftImages);
         setPendingUserMessage(null);
+        setStreamingAssistantMessage(null);
         selectedImagesRef.current = draftImages;
       }
     } finally {
@@ -388,7 +491,7 @@ export function AgentImageWorkbench({
 
         <div
           className={classNames(
-            "mx-auto flex w-full max-w-5xl flex-col bg-paper px-4 py-4 sm:px-6",
+            "flex w-full flex-col bg-paper px-4 py-4 sm:px-6",
             isCompact ? "min-h-0" : "min-h-screen",
           )}
         >
@@ -423,20 +526,36 @@ export function AgentImageWorkbench({
               {messages.length || pendingUserMessage ? (
                 <div className="grid gap-6">
                   {messages.map((item) => (
-                    <MessageBubble key={item.id} message={item} />
+                    <MessageBubble
+                      key={item.id}
+                      message={item}
+                      onPreviewImage={setPreviewImage}
+                    />
                   ))}
                   {pendingUserMessage && (
                     <MessageBubble
                       key={pendingUserMessage.id}
                       message={pendingUserMessage}
+                      onPreviewImage={setPreviewImage}
                     />
                   )}
-                  {isAwaitingAgentResponse && <ReceivingBubble />}
+                  {streamingAssistantMessage && (
+                    <MessageBubble
+                      key={streamingAssistantMessage.id}
+                      message={streamingAssistantMessage}
+                      onPreviewImage={setPreviewImage}
+                    />
+                  )}
+                  {isAwaitingAgentResponse && (
+                    <ReceivingBubble phrase={agentLoadingPhrases[loadingPhraseIndex]} />
+                  )}
                 </div>
               ) : (
                 <>
                   <EmptyConversation />
-                  {isAwaitingAgentResponse && <ReceivingBubble />}
+                  {isAwaitingAgentResponse && (
+                    <ReceivingBubble phrase={agentLoadingPhrases[loadingPhraseIndex]} />
+                  )}
                 </>
               )}
             </div>
@@ -527,6 +646,12 @@ export function AgentImageWorkbench({
           </section>
         </div>
       </div>
+      <ImagePreviewDialog
+        image={previewImage}
+        alt="ChatGPT 生成的图片"
+        onClose={() => setPreviewImage(null)}
+        downloadName={previewImage?.id ? `chatgpt-image-${previewImage.id}` : "chatgpt-image"}
+      />
     </section>
   );
 }
@@ -547,13 +672,13 @@ function EmptyConversation() {
   );
 }
 
-function ReceivingBubble() {
+function ReceivingBubble({ phrase }: { phrase: string }) {
   return (
     <article className="flex w-full justify-start" aria-live="polite">
       <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-ink">
         <div className="mb-2 flex items-center gap-2 text-[11px] text-ink-light">
           <span>ChatGPT</span>
-          <span>正在接收回复</span>
+          <span>{phrase}</span>
         </div>
         <div className="flex h-6 items-center gap-1" aria-hidden="true">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ink-light" />
@@ -565,8 +690,15 @@ function ReceivingBubble() {
   );
 }
 
-function MessageBubble({ message }: { message: ConversationMessage }) {
+function MessageBubble({
+  message,
+  onPreviewImage,
+}: {
+  message: ConversationMessage;
+  onPreviewImage: (image: ConversationImage) => void;
+}) {
   const isUser = message.role === "user";
+  const generatedImage = message.image ?? null;
 
   return (
     <article
@@ -600,12 +732,24 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
             {message.content}
           </p>
         )}
-        {message.image && (
-          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-surface-soft">
-            <img
-              src={message.image.src}
-              alt="ChatGPT 生成的图片"
-              className="max-h-[32rem] w-full object-contain"
+        {generatedImage && (
+          <div className="relative mt-3 overflow-hidden rounded-lg border border-border bg-surface-soft">
+            <button
+              type="button"
+              onClick={() => onPreviewImage(generatedImage)}
+              className="block w-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan/40"
+            >
+              <img
+                src={generatedImage.src}
+                alt="ChatGPT 生成的图片"
+                className="max-h-[32rem] w-full object-contain transition-refined hover:brightness-95"
+              />
+            </button>
+            <GeneratedImageActions
+              image={generatedImage}
+              onPreview={() => onPreviewImage(generatedImage)}
+              downloadName={`chatgpt-image-${generatedImage.id}`}
+              compact
             />
           </div>
         )}
