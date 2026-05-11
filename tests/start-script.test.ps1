@@ -37,12 +37,22 @@ foreach ($expected in @(
     "`$FrontendUrl = `"http://localhost:`$FrontendPort`"",
     "Invoke-CheckedCommand",
     "`$LASTEXITCODE",
+    "[switch]`$Docker",
+    "[switch]`$Local",
+    "`$Local = `$true",
+    "sqlite+pysqlite:///",
+    "IMAGE_STORAGE_BACKEND",
+    "local",
+    "Test-TcpPort",
+    "Frontend already appears to be running",
+    "Backend already appears to be running",
     "Docker Compose failed",
     "Use .\start.ps1 -SkipDocker",
     "Alembic migration failed",
     "npm.cmd",
     "run",
-    "dev"
+    "dev",
+    ".\start.ps1 -Docker"
 )) {
     if (-not $script.Contains($expected)) {
         throw "start.ps1 does not include expected text: $expected"

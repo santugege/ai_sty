@@ -17,29 +17,30 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("agent_sessions", sa.Column("summary", sa.Text(), nullable=True))
-    op.add_column(
-        "agent_sessions",
-        sa.Column("summary_updated_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "agent_messages", sa.Column("image_version_id", sa.Uuid(), nullable=True)
-    )
-    op.create_foreign_key(
-        "fk_agent_messages_image_version_id_image_versions",
-        "agent_messages",
-        "image_versions",
-        ["image_version_id"],
-        ["id"],
-    )
+    with op.batch_alter_table("agent_sessions") as batch_op:
+        batch_op.add_column(sa.Column("summary", sa.Text(), nullable=True))
+        batch_op.add_column(
+            sa.Column("summary_updated_at", sa.DateTime(timezone=True), nullable=True)
+        )
+
+    with op.batch_alter_table("agent_messages") as batch_op:
+        batch_op.add_column(sa.Column("image_version_id", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_agent_messages_image_version_id_image_versions",
+            "image_versions",
+            ["image_version_id"],
+            ["id"],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_agent_messages_image_version_id_image_versions",
-        "agent_messages",
-        type_="foreignkey",
-    )
-    op.drop_column("agent_messages", "image_version_id")
-    op.drop_column("agent_sessions", "summary_updated_at")
-    op.drop_column("agent_sessions", "summary")
+    with op.batch_alter_table("agent_messages") as batch_op:
+        batch_op.drop_constraint(
+            "fk_agent_messages_image_version_id_image_versions",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("image_version_id")
+
+    with op.batch_alter_table("agent_sessions") as batch_op:
+        batch_op.drop_column("summary_updated_at")
+        batch_op.drop_column("summary")
