@@ -6,10 +6,42 @@ export type GeneratedImage = {
   revisedPrompt?: string | null;
 };
 
+export type SubscriptionLimitPayload = {
+  error: string;
+  errorCode: "SUBSCRIPTION_LIMIT_REACHED";
+  usage: {
+    plan: {
+      name: string;
+    };
+    dailyRemaining: number;
+    monthlyRemaining: number;
+  };
+  plans: Array<{
+    id: string;
+    name: string;
+    price: string;
+    dailyImageLimit: number;
+    monthlyImageLimit: number;
+  }>;
+};
+
+export class SubscriptionLimitError extends Error {
+  payload: SubscriptionLimitPayload;
+
+  constructor(payload: SubscriptionLimitPayload) {
+    super(payload.error);
+    this.name = "SubscriptionLimitError";
+    this.payload = payload;
+  }
+}
+
 type ImageGenerationPayload = {
   image?: GeneratedImage;
   error?: string;
+  errorCode?: string;
   detail?: string;
+  usage?: SubscriptionLimitPayload["usage"];
+  plans?: SubscriptionLimitPayload["plans"];
 };
 
 const apiBaseUrl =
@@ -35,6 +67,9 @@ export async function submitImageGenerationForm(
   const payload = await readImageGenerationPayload(response);
 
   if (!response.ok || !payload.image) {
+    if (payload.errorCode === "SUBSCRIPTION_LIMIT_REACHED") {
+      throw new SubscriptionLimitError(payload as SubscriptionLimitPayload);
+    }
     throw new Error(payload.error || payload.detail || genericErrorMessage);
   }
 

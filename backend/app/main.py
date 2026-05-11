@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,6 +19,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -63,6 +67,33 @@ from app.image_request import (
     validate_uploaded_image_content,
 )
 from app.openai_images import request_image_from_openai
+from app.payment_models import PaymentOrderRow
+from app.payment_repository import PaymentRepository
+from app.payment_schemas import (
+    CreateSubscriptionZpayOrderRequest,
+    CreateZpayOrderRequest,
+    PaymentOrderEnvelope,
+)
+from app.payment_service import (
+    PaymentService,
+    PaymentServiceError,
+    next_order_no,
+    payment_order_to_dto,
+)
+from app.subscription_models import SubscriptionPlanRow
+from app.subscription_repository import SubscriptionRepository
+from app.subscription_schemas import (
+    EntitlementEnvelope,
+    SubscriptionPlanInput,
+    SubscriptionPlanListEnvelope,
+)
+from app.subscription_service import (
+    SubscriptionLimitError,
+    SubscriptionService,
+    SubscriptionServiceError,
+    subscription_plan_to_dto,
+    yuan_to_cents,
+)
 from app.user_models import UserRow
 
 logger = logging.getLogger(__name__)
@@ -208,6 +239,14 @@ def build_account_service(db: Session) -> AccountService:
     return AccountService(AccountRepository(db))
 
 
+def build_payment_service(db: Session) -> PaymentService:
+    return PaymentService(PaymentRepository(db))
+
+
+def build_subscription_service(db: Session) -> SubscriptionService:
+    return SubscriptionService(SubscriptionRepository(db))
+
+
 def set_session_cookie(response: Response, user: UserRow) -> None:
     expires_at = session_expires_at()
     response.set_cookie(
@@ -245,6 +284,30 @@ def agent_error_response(error: Exception) -> JSONResponse:
         return JSONResponse({"error": str(error)}, status_code=error.status_code)
 
     return JSONResponse({"error": "Agent request failed."}, status_code=500)
+
+
+def payment_error_response(error: PaymentServiceError) -> JSONResponse:
+    return JSONResponse({"error": str(error)}, status_code=error.status_code)
+
+
+def subscription_error_response(error: SubscriptionServiceError) -> JSONResponse:
+    if isinstance(error, SubscriptionLimitError):
+        return JSONResponse(error.payload, status_code=error.status_code)
+    return JSONResponse({"error": str(error)}, status_code=error.status_code)
+
+
+def plan_from_input(payload: SubscriptionPlanInput) -> SubscriptionPlanRow:
+    return SubscriptionPlanRow(
+        code=payload.code or payload.name.lower().replace(" ", "-"),
+        name=payload.name,
+        description=payload.description,
+        price_cents=yuan_to_cents(payload.price),
+        daily_image_limit=payload.dailyImageLimit,
+        monthly_image_limit=payload.monthlyImageLimit,
+        is_active=payload.isActive,
+        is_default=payload.isDefault,
+        sort_order=payload.sortOrder,
+    )
 
 
 def run_agent_service(method_name: str, *args, **kwargs):
@@ -349,6 +412,184 @@ async def list_admin_users(
         )
     except AccountServiceError as error:
         return auth_error_response(error)
+
+
+@app.post("/api/payments/zpay/orders")
+async def create_zpay_payment_order(
+    payload: CreateZpayOrderRequest,
+    current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        order = build_payment_service(db).create_zpay_order(
+            user=current_user,
+            subject=payload.subject,
+            amount=payload.amount,
+            pay_type=payload.payType,
+        )
+        return PaymentOrderEnvelope(order=payment_order_to_dto(order)).model_dump(
+            mode="json"
+        )
+    except PaymentServiceError as error:
+        return payment_error_response(error)
+
+
+@app.post("/api/payments/zpay/subscription-orders")
+async def create_subscription_zpay_payment_order(
+    payload: CreateSubscriptionZpayOrderRequest,
+    current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        subscription_service = build_subscription_service(db)
+        plan = subscription_service.repository.get_plan(payload.planId)
+        if plan is None or not plan.is_active:
+            return JSONResponse({"error": "Subscription plan not found."}, status_code=404)
+
+        if plan.price_cents <= 0:
+            payment_repository = PaymentRepository(db)
+            active_subscription = subscription_service.repository.get_active_subscription(
+                current_user.id,
+                datetime.now(timezone.utc),
+            )
+            if active_subscription is not None and active_subscription.plan_id == plan.id:
+                existing_order = (
+                    payment_repository.get_paid_subscription_order_by_subscription_id(
+                        active_subscription.id
+                    )
+                )
+                if existing_order is not None:
+                    return PaymentOrderEnvelope(
+                        order=payment_order_to_dto(existing_order)
+                    ).model_dump(mode="json")
+            else:
+                active_subscription = subscription_service.activate_subscription(
+                    current_user,
+                    plan,
+                )
+            order = payment_repository.create_order(
+                PaymentOrderRow(
+                    order_no=next_order_no(),
+                    user_id=current_user.id,
+                    user_public_id=current_user.user_id,
+                    provider="zpay",
+                    plan_id=plan.id,
+                    order_kind="subscription",
+                    subscription_id=active_subscription.id,
+                    subject=plan.name,
+                    amount_cents=plan.price_cents,
+                    pay_type=payload.payType,
+                    status="paid",
+                    payment_url=None,
+                )
+            )
+        else:
+            order = build_payment_service(db).create_subscription_zpay_order(
+                user=current_user,
+                plan=plan,
+                pay_type=payload.payType,
+            )
+        return PaymentOrderEnvelope(order=payment_order_to_dto(order)).model_dump(
+            mode="json"
+        )
+    except PaymentServiceError as error:
+        return payment_error_response(error)
+
+
+@app.get("/api/subscription/plans")
+async def list_subscription_plans(
+    _current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        plans = build_subscription_service(db).list_plans(include_inactive=False)
+        return SubscriptionPlanListEnvelope(
+            plans=[subscription_plan_to_dto(plan) for plan in plans]
+        ).model_dump(mode="json")
+    except SubscriptionServiceError as error:
+        return subscription_error_response(error)
+
+
+@app.get("/api/subscription/me")
+async def get_subscription_entitlement(
+    current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        entitlement = build_subscription_service(db).get_entitlement(current_user)
+        return EntitlementEnvelope(entitlement=entitlement.to_dto()).model_dump(
+            mode="json"
+        )
+    except SubscriptionServiceError as error:
+        return subscription_error_response(error)
+
+
+@app.get("/api/admin/subscription/plans")
+async def list_admin_subscription_plans(
+    _admin_user: UserRow = Depends(require_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        plans = build_subscription_service(db).list_plans(include_inactive=True)
+        return SubscriptionPlanListEnvelope(
+            plans=[subscription_plan_to_dto(plan) for plan in plans]
+        ).model_dump(mode="json")
+    except SubscriptionServiceError as error:
+        return subscription_error_response(error)
+
+
+@app.post("/api/admin/subscription/plans")
+async def create_admin_subscription_plan(
+    payload: dict[str, Any],
+    _admin_user: UserRow = Depends(require_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        plan_input = SubscriptionPlanInput(**payload)
+        repository = SubscriptionRepository(db)
+        if plan_input.isDefault:
+            repository.clear_default_plans()
+        plan = repository.save_plan(plan_from_input(plan_input))
+        return {"plan": subscription_plan_to_dto(plan).model_dump(mode="json")}
+    except IntegrityError:
+        db.rollback()
+        return JSONResponse({"error": "套餐代码已存在。"}, status_code=400)
+    except ValidationError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    except SubscriptionServiceError as error:
+        return subscription_error_response(error)
+
+
+@app.api_route("/api/payments/zpay/notify", methods=["GET", "POST"])
+async def handle_zpay_notify(
+    request: Request,
+    db: Session = Depends(get_db_session),
+):
+    params: dict[str, object] = dict(request.query_params)
+    if request.method == "POST":
+        form = await request.form()
+        params.update(dict(form))
+    try:
+        payment_repository = PaymentRepository(db)
+        order_no = str(params.get("out_trade_no") or "").strip()
+        order = payment_repository.get_by_order_no(order_no)
+        subscription_service = None
+        notify_user = None
+        if order is not None and order.order_kind == "subscription":
+            subscription_service = build_subscription_service(db)
+            notify_user = AccountRepository(db).get_by_id(order.user_id)
+
+        PaymentService(payment_repository).handle_zpay_notify(
+            params,
+            subscription_service=subscription_service,
+            user=notify_user,
+        )
+        return Response("success", media_type="text/plain")
+    except PaymentServiceError as error:
+        logger.warning("ZPAY notify rejected: %s", error)
+        return Response("fail", status_code=error.status_code, media_type="text/plain")
 
 
 @app.patch("/api/admin/users/{user_id}")
@@ -504,7 +745,8 @@ async def generate_image(
     aspectRatio: str = Form(""),
     imageCount: str = Form(""),
     image: UploadFile | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
 ):
     try:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -525,6 +767,11 @@ async def generate_image(
             avoid_elements=avoidElements,
             aspect_ratio=aspectRatio,
             image_count=imageCount,
+        )
+        subscription_service = build_subscription_service(db)
+        entitlement = subscription_service.ensure_can_generate(
+            user=current_user,
+            requested_images=valid_request.generation_settings.image_count,
         )
         image_request_kwargs = {
             "api_key": api_key or "",
@@ -547,10 +794,17 @@ async def generate_image(
             for image in generated.images
         ]
         first_image = images_payload[0]
+        subscription_service.record_generation(
+            user=current_user,
+            entitlement=entitlement,
+            image_count=len(generated.images),
+        )
         return {
             "image": first_image,
             "images": images_payload,
         }
+    except SubscriptionLimitError as error:
+        return subscription_error_response(error)
     except ImageRequestError as error:
         return JSONResponse({"error": error.message}, status_code=error.status_code)
     except Exception as error:

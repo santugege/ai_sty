@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Image from "next/image";
+import Link from "next/link";
 import {
   useMemo,
   useRef,
@@ -33,6 +34,8 @@ import {
   getImageDimensions,
   submitImageGenerationForm,
   type GeneratedImage,
+  SubscriptionLimitError,
+  type SubscriptionLimitPayload,
 } from "@/lib/image-api";
 
 type ProductWorkbenchProps = {
@@ -108,6 +111,8 @@ export function ProductWorkbench({
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<GeneratedImage | null>(null);
   const [error, setError] = useState("");
+  const [subscriptionLimit, setSubscriptionLimit] =
+    useState<SubscriptionLimitPayload | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitLockRef = useRef(false);
 
@@ -154,6 +159,7 @@ export function ProductWorkbench({
 
     submitLockRef.current = true;
     setError("");
+    setSubscriptionLimit(null);
     setResult(null);
     setIsSubmitting(true);
 
@@ -173,6 +179,11 @@ export function ProductWorkbench({
       setResultSize(size);
       setResult(generatedImage);
     } catch (caught) {
+      if (caught instanceof SubscriptionLimitError) {
+        setSubscriptionLimit(caught.payload);
+        setError("");
+        return;
+      }
       setError(caught instanceof Error ? caught.message : genericErrorMessage);
     } finally {
       submitLockRef.current = false;
@@ -505,6 +516,65 @@ export function ProductWorkbench({
           </button>
         </aside>
       </form>
+
+      {subscriptionLimit ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 px-4 py-6 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="subscription-limit-title"
+            className="w-full max-w-lg rounded-lg border border-border bg-surface p-5 shadow-refined sm:p-6"
+          >
+            <p className="text-xs font-bold uppercase text-accent">
+              SUBSCRIPTION_LIMIT_REACHED
+            </p>
+            <h2 id="subscription-limit-title" className="mt-1 text-xl font-black">
+              套餐额度不足
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-ink-light">
+              当前套餐 {subscriptionLimit.usage.plan.name} 今日剩余{" "}
+              {subscriptionLimit.usage.dailyRemaining} 张，本月剩余{" "}
+              {subscriptionLimit.usage.monthlyRemaining} 张。升级套餐后可继续生成。
+            </p>
+
+            <div className="mt-4 grid gap-2">
+              {subscriptionLimit.plans.slice(0, 3).map((plan) => (
+                <div
+                  key={plan.id}
+                  className="rounded-md border border-border bg-surface-soft p-3 text-sm"
+                >
+                  <p className="font-bold text-ink">
+                    {plan.name} · ¥{plan.price}/月
+                  </p>
+                  <p className="mt-1 text-ink-light">
+                    每日 {plan.dailyImageLimit} 张，每月 {plan.monthlyImageLimit} 张
+                  </p>
+                </div>
+              ))}
+              {subscriptionLimit.plans.length === 0 ? (
+                <p className="rounded-md border border-border bg-surface-soft p-3 text-sm text-ink-light">
+                  暂无可订阅套餐，请稍后查看套餐页。
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Link
+                href="/billing"
+                className="inline-flex h-10 items-center rounded-md bg-ink px-4 text-sm font-black text-white transition-refined hover:bg-accent"
+              >
+                查看套餐
+              </Link>
+              <button
+                onClick={() => setSubscriptionLimit(null)}
+                className="h-10 rounded-md border border-border px-4 text-sm font-bold text-ink-light transition-refined hover:border-border-hover hover:text-ink"
+              >
+                稍后再说
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

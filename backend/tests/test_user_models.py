@@ -124,4 +124,4 @@ def test_alembic_config_supports_root_invocation():
     )
 
     assert result.returncode == 0, result.stderr
-    assert "20260510_0005" in result.stdout
+    assert "20260510_0007" in result.stdout

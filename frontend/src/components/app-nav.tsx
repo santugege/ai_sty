@@ -3,16 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ListChecks,
   LogOut,
   MessageSquareText,
   Package,
   ShieldCheck,
+  WalletCards,
 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 
 const baseItems = [
   { label: "商品图", href: "/", icon: Package },
   { label: "ChatGPT 对话", href: "/agent", icon: MessageSquareText },
+  { label: "账户充值", href: "/billing", icon: WalletCards },
+];
+
+const adminItems = [
+  { label: "订阅管理", href: "/admin/subscriptions", icon: ListChecks },
+  { label: "账号管理", href: "/admin/accounts", icon: ShieldCheck },
 ];
 
 function isActivePath(pathname: string | null, href: string) {
@@ -25,9 +33,7 @@ function isActivePath(pathname: string | null, href: string) {
 export function AppNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const items = user?.isAdmin
-    ? [...baseItems, { label: "账号管理", href: "/admin/accounts", icon: ShieldCheck }]
-    : baseItems;
+  const items = user?.isAdmin ? [...baseItems, ...adminItems] : baseItems;
 
   return (
     <>

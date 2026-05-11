@@ -4,9 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth_dependencies import get_current_user
+from app.db import get_db_session
 from app.main import app
 from app.main import frontend_origins
 from app.openai_images import GeneratedImageEnvelope, GeneratedImageResult
+from app.subscription_service import SubscriptionLimitError
 from app.user_models import UserRow
 
 
@@ -30,13 +32,30 @@ def override_current_user():
 def allow_authenticated_user():
     app.dependency_overrides[get_current_user] = override_current_user
 
+    def override_db():
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_db
+
 
 def cleanup_auth_override():
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db_session, None)
 
 
 @pytest.fixture
-def authenticated_user():
+def authenticated_user(monkeypatch):
+    class FakeSubscriptionService:
+        def ensure_can_generate(self, user, requested_images):
+            return object()
+
+        def record_generation(self, user, entitlement, image_count):
+            return None
+
+    monkeypatch.setattr(
+        "app.main.build_subscription_service",
+        lambda db: FakeSubscriptionService(),
+    )
     allow_authenticated_user()
     try:
         yield
@@ -119,10 +138,81 @@ def test_image_route_rejects_removed_tool_id(monkeypatch, authenticated_user):
     assert response.json() == {"error": "请选择有效的图片工具。"}
 
 
+def test_image_route_returns_subscription_limit_error_before_openai(
+    monkeypatch, authenticated_user
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "key")
+    payload = {
+        "error": "Image generation quota reached.",
+        "errorCode": "SUBSCRIPTION_LIMIT_REACHED",
+        "usage": {
+            "plan": {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "code": "free",
+                "name": "Free",
+                "description": "Free plan",
+                "price": "0.00",
+                "dailyImageLimit": 1,
+                "monthlyImageLimit": 5,
+                "isActive": True,
+                "isDefault": True,
+                "sortOrder": 0,
+            },
+            "dailyLimit": 1,
+            "monthlyLimit": 5,
+            "todayUsed": 1,
+            "monthUsed": 1,
+            "dailyRemaining": 0,
+            "monthlyRemaining": 4,
+        },
+        "plans": [],
+    }
+    calls = {"ensure": 0, "openai": 0}
+
+    class FakeSubscriptionService:
+        def ensure_can_generate(self, user, requested_images):
+            calls["ensure"] += 1
+            assert user.email == "tester@example.com"
+            assert requested_images == 1
+            raise SubscriptionLimitError(payload)
+
+    def fake_request_image_from_openai(*args, **kwargs):
+        calls["openai"] += 1
+        raise AssertionError("OpenAI should not be called when quota is exhausted")
+
+    monkeypatch.setattr(
+        "app.main.build_subscription_service",
+        lambda db: FakeSubscriptionService(),
+    )
+    monkeypatch.setattr(
+        "app.main.request_image_from_openai",
+        fake_request_image_from_openai,
+    )
+
+    response = client.post(
+        "/api/images/generate",
+        data={"toolId": "product", "prompt": "quota check", "size": "1536x1024"},
+        files={"image": ("product.png", TINY_PNG, "image/png")},
+    )
+
+    assert response.status_code == 402
+    assert response.json() == payload
+    assert calls == {"ensure": 1, "openai": 0}
+
+
 def test_image_route_returns_generated_image(monkeypatch, authenticated_user):
     monkeypatch.setenv("OPENAI_API_KEY", "key")
     monkeypatch.setenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    quota_calls = []
+
+    class FakeSubscriptionService:
+        def ensure_can_generate(self, user, requested_images):
+            quota_calls.append(("ensure", user.email, requested_images))
+            return "entitlement"
+
+        def record_generation(self, user, entitlement, image_count):
+            quota_calls.append(("record", user.email, entitlement, image_count))
 
     def fake_request_image_from_openai(valid_request, api_key, model):
         assert valid_request.tool.id == "product"
@@ -137,6 +227,10 @@ def test_image_route_returns_generated_image(monkeypatch, authenticated_user):
     monkeypatch.setattr(
         "app.main.request_image_from_openai",
         fake_request_image_from_openai,
+    )
+    monkeypatch.setattr(
+        "app.main.build_subscription_service",
+        lambda db: FakeSubscriptionService(),
     )
 
     response = client.post(
@@ -160,6 +254,10 @@ def test_image_route_returns_generated_image(monkeypatch, authenticated_user):
             }
         ],
     }
+    assert quota_calls == [
+        ("ensure", "tester@example.com", 1),
+        ("record", "tester@example.com", "entitlement", 1),
+    ]
 
 
 def test_image_route_passes_openai_base_url_when_configured(

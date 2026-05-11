@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app import agent_models, user_models  # noqa: F401
+from app import agent_models, payment_models, subscription_models, user_models  # noqa: F401
 from app.db import Base, database_url
 
 config = context.config
