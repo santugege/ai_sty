@@ -229,6 +229,7 @@ test("app navigation hides account management from regular users", () => {
 test("admin accounts page does not provide admin promotion", () => {
   const source = readFileSync("src/app/admin/accounts/page.tsx", "utf8");
 
+  assert.match(source, /AppShell/);
   assert.match(source, /listUsers/);
   assert.match(source, /updateUser/);
   assert.match(source, /resetUserPassword/);

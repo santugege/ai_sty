@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AppNav } from "@/components/app-nav";
+import { AppShell } from "@/components/app-shell";
 
 type PaymentReturnPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -17,12 +17,8 @@ export default async function PaymentReturnPage({
   const tradeStatus = firstParam(params.trade_status) || "";
 
   return (
-    <main className="min-h-screen bg-paper text-ink">
-      <div className="grid min-h-screen xl:grid-cols-[10rem_minmax(0,1fr)]">
-        <AppNav />
-
-        <section className="grid min-h-screen place-items-center px-4 py-8">
-          <div className="w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-soft">
+    <AppShell fit="center">
+      <div className="w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-soft">
             <p className="text-xs font-bold uppercase text-accent">Payment</p>
             <h1 className="mt-1 text-2xl font-black">支付结果</h1>
             <p className="mt-3 text-sm leading-6 text-ink-light">
@@ -49,9 +45,6 @@ export default async function PaymentReturnPage({
               回到工作台
             </Link>
           </div>
-        </section>
-      </div>
-    </main>
+    </AppShell>
   );
 }
-

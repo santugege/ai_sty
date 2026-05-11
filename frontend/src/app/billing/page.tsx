@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Loader2, WalletCards } from "lucide-react";
-import { AppNav } from "@/components/app-nav";
+import { AppShell } from "@/components/app-shell";
 import {
   createSubscriptionZpayOrder,
   type CreateSubscriptionZpayOrderInput,
@@ -103,12 +103,8 @@ export default function BillingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-paper text-ink">
-      <div className="grid min-h-screen xl:grid-cols-[10rem_minmax(0,1fr)]">
-        <AppNav />
-
-        <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8">
-          <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <AppShell fit="page">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <section className="min-w-0">
               <p className="text-xs font-bold uppercase text-accent">Billing</p>
               <h1 className="mt-1 text-2xl font-black">订阅套餐</h1>
@@ -257,8 +253,6 @@ export default function BillingPage() {
               </dl>
             </aside>
           </div>
-        </section>
-      </div>
-    </main>
+    </AppShell>
   );
 }

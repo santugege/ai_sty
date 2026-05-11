@@ -164,7 +164,24 @@ test("agent workbench renders a ChatGPT-style conversation composer", () => {
 test("agent route renders the workbench", () => {
   const source = readFileSync("src/app/agent/page.tsx", "utf8");
 
+  assert.match(source, /AppShell/);
   assert.match(source, /AgentImageWorkbench/);
+  assert.match(source, /variant="compact"/);
+  assert.doesNotMatch(source, /return <AgentImageWorkbench \/>/);
+});
+
+test("agent workbench supports embedded compact shell styling", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /type AgentImageWorkbenchVariant = "full" \| "compact"/);
+  assert.match(source, /variant = "full"/);
+  assert.match(source, /isCompact/);
+  assert.match(source, /agentWorkbenchShell/);
+  assert.match(source, /compactAgentWorkbench/);
+  assert.match(source, /bg-paper/);
+  assert.match(source, /bg-surface/);
+  assert.doesNotMatch(source, /bg-\[#f7f7f4\]/);
+  assert.doesNotMatch(source, /border-\[#deded8\]/);
 });
 
 test("homepage labels the agent route as ChatGPT-style conversation", () => {

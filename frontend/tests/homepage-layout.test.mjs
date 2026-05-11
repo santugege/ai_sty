@@ -7,6 +7,10 @@ const appNavSource = readFileSync(
   new URL("../src/components/app-nav.tsx", import.meta.url),
   "utf8",
 );
+const appShellPath = new URL("../src/components/app-shell.tsx", import.meta.url);
+const appShellSource = existsSync(appShellPath)
+  ? readFileSync(appShellPath, "utf8")
+  : "";
 const toolsSource = readFileSync(new URL("../src/lib/tools.ts", import.meta.url), "utf8");
 const productWorkbenchSource = readFileSync(
   new URL("../src/components/product-workbench.tsx", import.meta.url),
@@ -18,10 +22,12 @@ const homeProductWorkbenchPath = new URL(
 );
 
 test("homepage keeps only the rail and compact product workbench", () => {
-  assert.match(pageSource, /homepageShell/);
-  assert.match(pageSource, /AppNav/);
+  assert.equal(existsSync(appShellPath), true);
+  assert.match(pageSource, /AppShell/);
+  assert.match(appShellSource, /homepageShell/);
+  assert.match(appShellSource, /AppNav/);
   assert.match(appNavSource, /homepageRail/);
-  assert.match(pageSource, /homepageWorkbenchDock/);
+  assert.match(appShellSource, /homepageWorkbenchDock/);
   assert.match(pageSource, /ProductWorkbench/);
   assert.match(pageSource, /variant="compact"/);
   assert.match(pageSource, /getToolById\("product"\)/);

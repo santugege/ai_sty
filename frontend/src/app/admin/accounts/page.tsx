@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { KeyRound, Loader2, RefreshCcw } from "lucide-react";
-import { AppNav } from "@/components/app-nav";
+import { AppShell } from "@/components/app-shell";
 import { useAuth } from "@/components/auth-provider";
 import {
   listUsers,
@@ -114,26 +114,19 @@ export default function AdminAccountsPage() {
 
   if (!user?.isAdmin) {
     return (
-      <main className="grid min-h-screen xl:grid-cols-[10rem_minmax(0,1fr)]">
-        <AppNav />
-        <section className="grid min-h-screen place-items-center px-4 py-8">
-          <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-6 text-center shadow-soft">
+      <AppShell fit="center">
+        <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-6 text-center shadow-soft">
             <h1 className="text-xl font-black">无权访问</h1>
             <p className="mt-2 text-sm text-ink-light">
               当前账号没有账号管理权限。
             </p>
           </div>
-        </section>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-paper text-ink">
-      <div className="grid min-h-screen xl:grid-cols-[10rem_minmax(0,1fr)]">
-        <AppNav />
-
-        <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8">
+    <AppShell fit="page">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase text-accent">Admin</p>
@@ -263,8 +256,6 @@ export default function AdminAccountsPage() {
               </p>
             ) : null}
           </div>
-        </section>
-      </div>
-    </main>
+    </AppShell>
   );
 }

@@ -29,6 +29,7 @@ test("billing page loads backend subscription plans and creates subscription ord
   assert.equal(existsSync("src/app/billing/page.tsx"), true);
   const source = readFileSync("src/app/billing/page.tsx", "utf8");
 
+  assert.match(source, /AppShell/);
   assert.match(source, /listSubscriptionPlans/);
   assert.match(source, /createSubscriptionZpayOrder/);
   assert.doesNotMatch(source, /const plans = \[/);
@@ -41,6 +42,7 @@ test("billing page loads backend subscription plans and creates subscription ord
 test("admin subscription page manages plan fields", () => {
   const source = readFileSync("src/app/admin/subscriptions/page.tsx", "utf8");
 
+  assert.match(source, /AppShell/);
   assert.match(source, /listAdminSubscriptionPlans/);
   assert.match(source, /createAdminSubscriptionPlan/);
   assert.match(source, /dailyImageLimit/);

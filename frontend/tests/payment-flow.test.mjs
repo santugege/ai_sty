@@ -20,10 +20,11 @@ test("billing page exposes subscription zpay purchase flow", () => {
 
   assert.match(paymentSource, /createSubscriptionZpayOrder/);
   assert.match(paymentSource, /\/api\/payments\/zpay\/subscription-orders/);
+  assert.match(source, /AppShell/);
   assert.match(source, /createSubscriptionZpayOrder/);
   assert.match(source, /planId: selectedPlan\.id/);
   assert.doesNotMatch(source, /createZpayOrder/);
-  assert.match(source, /AppNav/);
+  assert.doesNotMatch(source, /AppNav/);
   assert.match(source, /支付宝/);
   assert.match(source, /微信/);
   assert.match(source, /window\.location\.assign/);
@@ -36,7 +37,8 @@ test("zpay return page gives payment status handoff", () => {
   assert.equal(existsSync("src/app/payments/return/page.tsx"), true);
   const source = readFileSync("src/app/payments/return/page.tsx", "utf8");
 
-  assert.match(source, /AppNav/);
+  assert.match(source, /AppShell/);
+  assert.doesNotMatch(source, /AppNav/);
   assert.match(source, /支付结果/);
   assert.match(source, /orderNo/);
   assert.match(source, /回到工作台/);

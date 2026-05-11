@@ -41,12 +41,13 @@ test("frontend registry exposes only the product image tool with readable labels
 });
 
 test("tool detail shell is restricted to the product workbench", () => {
-  assert.match(toolPageSource, /Studio Matrix/);
-  assert.match(toolPageSource, /toolTopBar/);
+  assert.match(toolPageSource, /AppShell/);
   assert.match(toolPageSource, /bg-paper/);
   assert.match(toolPageSource, /text-ink/);
   assert.match(toolPageSource, /ProductWorkbench/);
   assert.match(toolPageSource, /notFound/);
+  assert.doesNotMatch(toolPageSource, /Studio Matrix/);
+  assert.doesNotMatch(toolPageSource, /toolTopBar/);
   assert.doesNotMatch(toolPageSource, /ToolForm/);
   assert.doesNotMatch(toolPageSource, /text-6xl|text-7xl|text-8xl/);
   assert.doesNotMatch(toolPageSource, /text-paper-dim/);

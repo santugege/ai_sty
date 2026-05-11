@@ -30,11 +30,21 @@ import {
 
 const imageSizes = ["1024x1024", "1536x1024", "1024x1536"] as const;
 
+type AgentImageWorkbenchVariant = "full" | "compact";
+
+type AgentImageWorkbenchProps = {
+  variant?: AgentImageWorkbenchVariant;
+};
+
 type SelectedImage = {
   id: string;
   file: File;
   previewUrl: string;
 };
+
+function classNames(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -47,7 +57,10 @@ function revokeSelectedImages(images: SelectedImage[]) {
   images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
 }
 
-export function AgentImageWorkbench() {
+export function AgentImageWorkbench({
+  variant = "full",
+}: AgentImageWorkbenchProps) {
+  const isCompact = variant === "compact";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const requestSequenceRef = useRef(0);
   const isMountedRef = useRef(false);
@@ -287,13 +300,27 @@ export function AgentImageWorkbench() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f7f4] text-[#171717]">
-      <div className="grid min-h-screen lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="border-b border-[#deded8] bg-white px-3 py-4 lg:border-b-0 lg:border-r">
+    <section
+      className={classNames(
+        "agentWorkbenchShell min-w-0 bg-paper text-ink",
+        isCompact
+          ? "compactAgentWorkbench h-full min-h-0"
+          : "min-h-screen px-4 py-4 sm:px-6",
+      )}
+    >
+      <div
+        className={classNames(
+          "grid min-w-0 overflow-hidden border border-border bg-border shadow-refined lg:grid-cols-[18rem_minmax(0,1fr)]",
+          isCompact
+            ? "h-full min-h-[42rem] rounded-xl xl:min-h-0"
+            : "min-h-screen rounded-xl",
+        )}
+      >
+        <aside className="min-w-0 border-b border-border bg-surface px-3 py-4 lg:border-b-0 lg:border-r">
           <button
             type="button"
             onClick={handleNewSession}
-            className="mb-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-[#d2d2cc] text-sm font-medium transition hover:border-[#171717] disabled:opacity-50"
+            className="mb-3 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-border text-sm font-medium transition-refined hover:border-ink disabled:opacity-50"
             disabled={isSubmitting}
           >
             <Plus aria-hidden="true" className="h-4 w-4" />
@@ -308,38 +335,43 @@ export function AgentImageWorkbench() {
                 disabled={isSubmitting}
                 className={`rounded-md px-3 py-2 text-left text-sm transition ${
                   activeSessionId === session.id
-                    ? "bg-[#ededdf]"
-                    : "hover:bg-[#f3f3ed] disabled:hover:bg-transparent"
+                    ? "bg-paper-dim"
+                    : "hover:bg-surface-soft disabled:hover:bg-transparent"
                 }`}
               >
                 <span className="block truncate font-medium">
                   {session.title}
                 </span>
                 {session.summary && (
-                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-[#6f6f68]">
+                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-ink-light">
                     {session.summary}
                   </span>
                 )}
               </button>
             ))}
             {isLoadingSessions && (
-              <p className="px-3 py-4 text-sm text-[#6f6f68]">加载会话中...</p>
+              <p className="px-3 py-4 text-sm text-ink-light">加载会话中...</p>
             )}
             {!isLoadingSessions && sessions.length === 0 && (
-              <p className="px-3 py-4 text-sm text-[#6f6f68]">暂无会话</p>
+              <p className="px-3 py-4 text-sm text-ink-light">暂无会话</p>
             )}
           </div>
         </aside>
 
-        <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-4 sm:px-6">
-          <header className="flex min-h-12 items-center justify-between gap-3 border-b border-[#deded8]">
+        <div
+          className={classNames(
+            "mx-auto flex w-full max-w-5xl flex-col bg-paper px-4 py-4 sm:px-6",
+            isCompact ? "min-h-0" : "min-h-screen",
+          )}
+        >
+          <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border">
             <div className="min-w-0">
               <p className="text-sm font-semibold">ChatGPT 对话</p>
-              <p className="truncate text-xs text-[#6f6f68]">
+              <p className="truncate text-xs text-ink-light">
                 多会话持久上下文，支持图片上传与连续编辑
               </p>
             </div>
-            <label className="text-xs text-[#6f6f68]">
+            <label className="text-xs text-ink-light">
               <span className="sr-only">输出尺寸</span>
               <select
                 value={size}
@@ -347,7 +379,7 @@ export function AgentImageWorkbench() {
                   setSize(event.target.value as (typeof imageSizes)[number])
                 }
                 disabled={isSubmitting}
-                className="h-9 rounded-md border border-[#d2d2cc] bg-white px-2 text-xs outline-none focus:border-[#171717]"
+                className="h-9 rounded-md border border-border bg-surface px-2 text-xs outline-none transition-refined focus:border-ink"
               >
                 {imageSizes.map((option) => (
                   <option key={option} value={option}>
@@ -372,12 +404,12 @@ export function AgentImageWorkbench() {
             </div>
 
             {currentImage && (
-              <section className="mb-3 overflow-hidden rounded-lg border border-[#d2d2cc] bg-white">
-                <div className="flex items-center justify-between px-3 py-2 text-xs text-[#6f6f68]">
+              <section className="mb-3 overflow-hidden rounded-lg border border-border bg-surface">
+                <div className="flex items-center justify-between px-3 py-2 text-xs text-ink-light">
                   <span>当前图片上下文</span>
                   <span>{currentImage.model}</span>
                 </div>
-                <div className="max-h-56 overflow-hidden bg-[#ededdf]">
+                <div className="max-h-56 overflow-hidden bg-paper-dim">
                   <img
                     src={currentImage.src}
                     alt="当前图片上下文"
@@ -388,7 +420,7 @@ export function AgentImageWorkbench() {
             )}
 
             {error && (
-              <div className="mb-3 flex gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <div className="mb-3 flex gap-2 rounded-md border border-error/30 bg-red-50 px-3 py-2 text-sm text-error">
                 <AlertCircle
                   aria-hidden="true"
                   className="mt-0.5 h-4 w-4 shrink-0"
@@ -399,14 +431,14 @@ export function AgentImageWorkbench() {
 
             <form
               onSubmit={handleSubmit}
-              className="mb-3 rounded-2xl border border-[#d2d2cc] bg-white p-2 shadow-[0_18px_50px_rgba(25,25,20,0.08)]"
+              className="mb-3 rounded-xl border border-border bg-surface p-2 shadow-soft"
             >
               {selectedImages.length > 0 && (
                 <div className="mb-2 flex gap-2 overflow-x-auto px-1 pt-1">
                   {selectedImages.map((image) => (
                     <div
                       key={image.id}
-                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-[#d2d2cc] bg-[#f3f3ed]"
+                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-soft"
                     >
                       <img
                         src={image.previewUrl}
@@ -433,7 +465,7 @@ export function AgentImageWorkbench() {
                 rows={3}
                 disabled={isSubmitting}
                 placeholder="询问或描述要怎么编辑图片"
-                className="max-h-40 min-h-16 w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#171717] outline-none placeholder:text-[#8a8a82]"
+                className="max-h-40 min-h-16 w-full resize-none rounded-xl border-0 bg-transparent px-3 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-lighter"
               />
 
               <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -452,11 +484,11 @@ export function AgentImageWorkbench() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isSubmitting}
                     title="上传图片"
-                    className="grid h-9 w-9 place-items-center rounded-full border border-[#d2d2cc] text-[#454540] transition hover:border-[#171717] disabled:opacity-50"
+                    className="grid h-9 w-9 place-items-center rounded-full border border-border text-ink transition-refined hover:border-ink disabled:opacity-50"
                   >
                     <Plus aria-hidden="true" className="h-4 w-4" />
                   </button>
-                  <span className="min-w-0 text-xs leading-5 text-[#7d7d75]">
+                  <span className="min-w-0 text-xs leading-5 text-ink-light">
                     PNG / JPG / WebP，图片会随本轮消息发送
                   </span>
                 </div>
@@ -464,7 +496,7 @@ export function AgentImageWorkbench() {
                   type="submit"
                   disabled={!canSubmit}
                   title="发送"
-                  className="grid h-9 w-9 place-items-center rounded-full bg-[#171717] text-white transition hover:bg-[#0f8d7b] disabled:bg-[#c9c9c1] disabled:text-[#77776f]"
+                  className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white transition-refined hover:bg-accent disabled:bg-paper-dim disabled:text-ink-lighter"
                 >
                   {isSubmitting ? (
                     <Loader2
@@ -480,7 +512,7 @@ export function AgentImageWorkbench() {
           </section>
         </div>
       </div>
-    </main>
+    </section>
   );
 }
 
@@ -491,13 +523,13 @@ function EmptyConversation({
 }) {
   return (
     <div className="flex min-h-[45vh] flex-col items-center justify-center text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-xl border border-[#d2d2cc] bg-white">
-        <ImagePlus aria-hidden="true" className="h-5 w-5 text-[#0f8d7b]" />
+      <div className="grid h-12 w-12 place-items-center rounded-xl border border-border bg-surface">
+        <ImagePlus aria-hidden="true" className="h-5 w-5 text-accent" />
       </div>
       <h1 className="mt-5 text-2xl font-semibold tracking-tight sm:text-3xl">
         今天要编辑哪张图片？
       </h1>
-      <p className="mt-3 max-w-md text-sm leading-6 text-[#6f6f68]">
+      <p className="mt-3 max-w-md text-sm leading-6 text-ink-light">
         像 ChatGPT 一样直接上传图片并输入需求；每个会话都会保存上下文和摘要。
       </p>
       {currentImage && <span className="sr-only">已有当前图片上下文</span>}
@@ -515,11 +547,11 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
       <div
         className={`max-w-[86%] rounded-2xl px-4 py-3 ${
           isUser
-            ? "bg-[#e8e8e3] text-[#171717]"
-            : "border border-[#d2d2cc] bg-white text-[#20201c]"
+            ? "bg-paper-dim text-ink"
+            : "border border-border bg-surface text-ink"
         }`}
       >
-        <div className="mb-2 flex items-center gap-2 text-[11px] text-[#77776f]">
+        <div className="mb-2 flex items-center gap-2 text-[11px] text-ink-light">
           <span>{isUser ? "你" : "ChatGPT"}</span>
           <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
         </div>
@@ -530,7 +562,7 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
                 key={attachment.id}
                 src={attachment.src}
                 alt={attachment.name}
-                className="h-24 w-24 rounded-lg border border-[#d2d2cc] object-cover"
+                className="h-24 w-24 rounded-lg border border-border object-cover"
               />
             ))}
           </div>
@@ -541,7 +573,7 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
           </p>
         )}
         {message.image && (
-          <div className="mt-3 overflow-hidden rounded-lg border border-[#d2d2cc] bg-[#f3f3ed]">
+          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-surface-soft">
             <img
               src={message.image.src}
               alt="ChatGPT 生成的图片"
