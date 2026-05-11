@@ -16,6 +16,18 @@ function Require-Command {
     }
 }
 
+function Invoke-CheckedCommand {
+    param(
+        [scriptblock]$Command,
+        [string]$FailureMessage
+    )
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw $FailureMessage
+    }
+}
+
 function Wait-ForTcpPort {
     param(
         [string]$HostName,
@@ -63,7 +75,9 @@ if (-not (Test-Path (Join-Path $Root "frontend\node_modules"))) {
 if (-not $SkipDocker) {
     Require-Command "docker"
     Write-Host "Starting PostgreSQL and MinIO with Docker Compose..." -ForegroundColor Cyan
-    docker compose up -d postgres minio minio-init
+    Invoke-CheckedCommand `
+        -Command { docker compose up -d postgres minio minio-init } `
+        -FailureMessage "Docker Compose failed. The images may not have been pulled, or Docker Hub may be unreachable. Retry later, run 'docker compose pull' manually, or start dependencies yourself. Use .\start.ps1 -SkipDocker after dependencies are running."
     Write-Host "Waiting for PostgreSQL on localhost:5432" -ForegroundColor Cyan
     Wait-ForTcpPort -HostName "127.0.0.1" -Port 5432
     Write-Host ""
@@ -71,7 +85,9 @@ if (-not $SkipDocker) {
 
 if (-not $SkipMigrations) {
     Write-Host "Applying database migrations..." -ForegroundColor Cyan
-    & $BackendPython -m alembic -c backend\alembic.ini upgrade head
+    Invoke-CheckedCommand `
+        -Command { & $BackendPython -m alembic -c backend\alembic.ini upgrade head } `
+        -FailureMessage "Alembic migration failed. Check whether PostgreSQL is running and DATABASE_URL in backend\.env is correct."
 }
 
 $BackendUrl = "http://127.0.0.1:$BackendPort"

@@ -35,6 +35,11 @@ foreach ($expected in @(
     "8000",
     "[int]`$FrontendPort = 3000",
     "`$FrontendUrl = `"http://localhost:`$FrontendPort`"",
+    "Invoke-CheckedCommand",
+    "`$LASTEXITCODE",
+    "Docker Compose failed",
+    "Use .\start.ps1 -SkipDocker",
+    "Alembic migration failed",
     "npm.cmd",
     "run",
     "dev"
