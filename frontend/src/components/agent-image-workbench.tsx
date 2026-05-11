@@ -12,7 +12,6 @@ import {
 import {
   AlertCircle,
   ImagePlus,
-  Loader2,
   Plus,
   Send,
   X,
@@ -23,7 +22,6 @@ import {
   listAgentSessions,
   sendAgentSessionMessage,
   type AgentEnvelope,
-  type ConversationImage,
   type ConversationListItem,
   type ConversationMessage,
 } from "@/lib/agent-api";
@@ -57,6 +55,30 @@ function revokeSelectedImages(images: SelectedImage[]) {
   images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
 }
 
+function createPendingUserMessage(
+  content: string,
+  images: SelectedImage[],
+): ConversationMessage {
+  const createdAt = new Date().toISOString();
+
+  return {
+    id: `pending-user-${crypto.randomUUID()}`,
+    role: "user",
+    content,
+    attachments: images.map((image) => ({
+      id: image.id,
+      name: image.file.name,
+      mimeType: image.file.type || "application/octet-stream",
+      src: image.previewUrl,
+      createdAt,
+    })),
+    responseId: null,
+    imageVersionId: images.at(-1)?.id ?? null,
+    image: null,
+    createdAt,
+  };
+}
+
 export function AgentImageWorkbench({
   variant = "full",
 }: AgentImageWorkbenchProps) {
@@ -70,13 +92,13 @@ export function AgentImageWorkbench({
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
-  const [currentImage, setCurrentImage] = useState<ConversationImage | null>(
-    null,
-  );
+  const [pendingUserMessage, setPendingUserMessage] =
+    useState<ConversationMessage | null>(null);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [size, setSize] = useState<(typeof imageSizes)[number]>("1536x1024");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAwaitingAgentResponse, setIsAwaitingAgentResponse] = useState(false);
 
   const canSubmit =
     !isSubmitting && (message.trim().length > 0 || selectedImages.length > 0);
@@ -91,12 +113,14 @@ export function AgentImageWorkbench({
   }
 
   function applyEnvelope(envelope: AgentEnvelope) {
+    setPendingUserMessage(null);
     setMessages(envelope.messages);
-    setCurrentImage(envelope.currentImage ?? null);
   }
 
-  function clearDraft(images: SelectedImage[] = selectedImages) {
-    revokeSelectedImages(images);
+  function clearDraft(images: SelectedImage[] = selectedImages, revoke = true) {
+    if (revoke) {
+      revokeSelectedImages(images);
+    }
     selectedImagesRef.current = [];
     setSelectedImages([]);
     setMessage("");
@@ -196,6 +220,7 @@ export function AgentImageWorkbench({
     const requestId = beginRequest();
     setError("");
     setActiveSessionId(sessionId);
+    setPendingUserMessage(null);
     clearDraft();
     setIsSubmitting(true);
     try {
@@ -218,11 +243,12 @@ export function AgentImageWorkbench({
     beginRequest();
     clearDraft();
     setActiveSessionId(null);
+    setPendingUserMessage(null);
     setMessages([]);
-    setCurrentImage(null);
     setError("");
     setIsLoadingSessions(false);
     setIsSubmitting(false);
+    setIsAwaitingAgentResponse(false);
   }
 
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
@@ -231,13 +257,18 @@ export function AgentImageWorkbench({
       return;
     }
 
+    const draftMessage = message;
+    const draftImages = selectedImages;
     const formData = new FormData();
-    formData.append("message", message);
+    formData.append("message", draftMessage);
     formData.append("size", size);
-    selectedImages.forEach((image) => formData.append("images", image.file));
+    draftImages.forEach((image) => formData.append("images", image.file));
 
     setError("");
     setIsSubmitting(true);
+    setIsAwaitingAgentResponse(true);
+    setPendingUserMessage(createPendingUserMessage(draftMessage, draftImages));
+    clearDraft(draftImages, false);
     const requestId = beginRequest();
 
     try {
@@ -247,10 +278,7 @@ export function AgentImageWorkbench({
       if (!isCurrentRequest(requestId)) {
         return;
       }
-      revokeSelectedImages(selectedImages);
-      selectedImagesRef.current = [];
-      setSelectedImages([]);
-      setMessage("");
+      revokeSelectedImages(draftImages);
       applyEnvelope(envelope);
       setActiveSessionId(envelope.conversation.id);
       try {
@@ -284,10 +312,15 @@ export function AgentImageWorkbench({
     } catch (caught) {
       if (isCurrentRequest(requestId)) {
         setError(caught instanceof Error ? caught.message : "Agent 请求失败。");
+        setMessage(draftMessage);
+        setSelectedImages(draftImages);
+        setPendingUserMessage(null);
+        selectedImagesRef.current = draftImages;
       }
     } finally {
       if (isCurrentRequest(requestId)) {
         setIsSubmitting(false);
+        setIsAwaitingAgentResponse(false);
       }
     }
   }
@@ -342,11 +375,6 @@ export function AgentImageWorkbench({
                 <span className="block truncate font-medium">
                   {session.title}
                 </span>
-                {session.summary && (
-                  <span className="mt-1 line-clamp-2 block text-xs leading-5 text-ink-light">
-                    {session.summary}
-                  </span>
-                )}
               </button>
             ))}
             {isLoadingSessions && (
@@ -392,32 +420,26 @@ export function AgentImageWorkbench({
 
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="flex-1 overflow-y-auto py-6">
-              {messages.length ? (
+              {messages.length || pendingUserMessage ? (
                 <div className="grid gap-6">
                   {messages.map((item) => (
                     <MessageBubble key={item.id} message={item} />
                   ))}
+                  {pendingUserMessage && (
+                    <MessageBubble
+                      key={pendingUserMessage.id}
+                      message={pendingUserMessage}
+                    />
+                  )}
+                  {isAwaitingAgentResponse && <ReceivingBubble />}
                 </div>
               ) : (
-                <EmptyConversation currentImage={currentImage} />
+                <>
+                  <EmptyConversation />
+                  {isAwaitingAgentResponse && <ReceivingBubble />}
+                </>
               )}
             </div>
-
-            {currentImage && (
-              <section className="mb-3 overflow-hidden rounded-lg border border-border bg-surface">
-                <div className="flex items-center justify-between px-3 py-2 text-xs text-ink-light">
-                  <span>当前图片上下文</span>
-                  <span>{currentImage.model}</span>
-                </div>
-                <div className="max-h-56 overflow-hidden bg-paper-dim">
-                  <img
-                    src={currentImage.src}
-                    alt="当前图片上下文"
-                    className="mx-auto max-h-56 w-auto object-contain"
-                  />
-                </div>
-              </section>
-            )}
 
             {error && (
               <div className="mb-3 flex gap-2 rounded-md border border-error/30 bg-red-50 px-3 py-2 text-sm text-error">
@@ -498,14 +520,7 @@ export function AgentImageWorkbench({
                   title="发送"
                   className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white transition-refined hover:bg-accent disabled:bg-paper-dim disabled:text-ink-lighter"
                 >
-                  {isSubmitting ? (
-                    <Loader2
-                      aria-hidden="true"
-                      className="h-4 w-4 animate-spin"
-                    />
-                  ) : (
-                    <Send aria-hidden="true" className="h-4 w-4" />
-                  )}
+                  <Send aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
             </form>
@@ -516,11 +531,7 @@ export function AgentImageWorkbench({
   );
 }
 
-function EmptyConversation({
-  currentImage,
-}: {
-  currentImage: ConversationImage | null;
-}) {
+function EmptyConversation() {
   return (
     <div className="flex min-h-[45vh] flex-col items-center justify-center text-center">
       <div className="grid h-12 w-12 place-items-center rounded-xl border border-border bg-surface">
@@ -532,8 +543,25 @@ function EmptyConversation({
       <p className="mt-3 max-w-md text-sm leading-6 text-ink-light">
         像 ChatGPT 一样直接上传图片并输入需求；每个会话都会保存上下文和摘要。
       </p>
-      {currentImage && <span className="sr-only">已有当前图片上下文</span>}
     </div>
+  );
+}
+
+function ReceivingBubble() {
+  return (
+    <article className="flex w-full justify-start" aria-live="polite">
+      <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-ink">
+        <div className="mb-2 flex items-center gap-2 text-[11px] text-ink-light">
+          <span>ChatGPT</span>
+          <span>正在接收回复</span>
+        </div>
+        <div className="flex h-6 items-center gap-1" aria-hidden="true">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ink-light" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ink-light [animation-delay:120ms]" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ink-light [animation-delay:240ms]" />
+        </div>
+      </div>
+    </article>
   );
 }
 

@@ -38,7 +38,6 @@ const successEnvelope = {
       createdAt: "2026-05-10T00:00:00Z",
     },
   ],
-  currentImage: null,
   error: null,
 };
 
@@ -51,6 +50,11 @@ test("agent api client uses persisted session routes", () => {
   assert.match(source, /sendAgentSessionMessage/);
   assert.match(source, /\/api\/agent\/sessions/);
   assert.match(source, /imageVersionId\?: string \| null/);
+  assert.match(source, /image\?: ConversationImage \| null/);
+  assert.doesNotMatch(source, /currentImage\?:/);
+  assert.doesNotMatch(source, /sendConversationMessage/);
+  assert.doesNotMatch(source, /resetConversation/);
+  assert.doesNotMatch(source, /\/api\/agent\/conversation/);
 });
 
 test("agent api client accepts successful envelopes with null errors", async (t) => {
@@ -159,6 +163,44 @@ test("agent workbench renders a ChatGPT-style conversation composer", () => {
   assert.doesNotMatch(source, /versions\.map/);
   assert.doesNotMatch(source, /restoreAgentVersion/);
   assert.doesNotMatch(source, /handleRestore/);
+});
+
+test("agent workbench shows receiving state in the message stream after submit", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /const draftMessage = message/);
+  assert.match(source, /const draftImages = selectedImages/);
+  assert.match(source, /pendingUserMessage/);
+  assert.match(source, /createPendingUserMessage/);
+  assert.match(source, /setPendingUserMessage\(createPendingUserMessage\(draftMessage, draftImages\)\)/);
+  assert.match(source, /pendingUserMessage && \([\s\S]*<MessageBubble/);
+  assert.match(source, /clearDraft\(draftImages, false\)/);
+  assert.match(source, /revokeSelectedImages\(draftImages\)/);
+  assert.match(source, /isAwaitingAgentResponse/);
+  assert.match(source, /setIsAwaitingAgentResponse\(true\)/);
+  assert.match(source, /setIsAwaitingAgentResponse\(false\)/);
+  assert.match(source, /ReceivingBubble/);
+  assert.match(source, /正在接收回复/);
+  assert.doesNotMatch(source, /Loader2/);
+});
+
+test("agent workbench keeps internal summaries out of the session list", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+  const sessionListMarkup = source.slice(
+    source.indexOf("{sessions.map"),
+    source.indexOf("{isLoadingSessions"),
+  );
+
+  assert.match(sessionListMarkup, /session\.title/);
+  assert.doesNotMatch(sessionListMarkup, /session\.summary/);
+});
+
+test("agent workbench does not render a dedicated current image context panel", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.doesNotMatch(source, /currentImage/);
+  assert.doesNotMatch(source, /ConversationImage/);
+  assert.doesNotMatch(source, /max-h-56/);
 });
 
 test("agent route renders the workbench", () => {

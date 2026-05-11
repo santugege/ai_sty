@@ -55,7 +55,6 @@ export type AgentEnvelope = {
     updatedAt: string;
   };
   messages: ConversationMessage[];
-  currentImage?: ConversationImage | null;
   error?: string | null;
 };
 
@@ -98,25 +97,6 @@ export async function sendAgentSessionMessage(
       method: "POST",
       credentials: "include",
       body: formData,
-    }),
-  );
-}
-
-export async function sendConversationMessage(formData: FormData) {
-  return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/conversation`, {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    }),
-  );
-}
-
-export async function resetConversation() {
-  return readAgentResponse(
-    await fetch(`${apiBaseUrl}/api/agent/conversation/reset`, {
-      method: "POST",
-      credentials: "include",
     }),
   );
 }

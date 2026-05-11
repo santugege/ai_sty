@@ -61,6 +61,5 @@ class ConversationMessageDto(BaseModel):
 class AgentEnvelope(BaseModel):
     conversation: ConversationDto
     messages: list[ConversationMessageDto]
-    currentImage: ConversationImageDto | None
     error: str | None = None
 
