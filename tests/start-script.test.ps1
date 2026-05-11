@@ -34,20 +34,27 @@ $requiredText = @(
     "--port",
     "8000",
     "[int]`$FrontendPort = 3000",
-    "`$FrontendUrl = `"http://localhost:`$FrontendPort`"",
+    "`$FrontendUrl = `"http://127.0.0.1:`$FrontendPort`"",
     "Invoke-CheckedCommand",
     "`$LASTEXITCODE",
+    "Assert-PortAvailable",
+    "Wait-ForHttpEndpoint",
     "Docker Compose failed",
     "Alembic migration failed",
     "npm.cmd",
     "run",
-    "dev"
+    "dev",
+    "--webpack"
 )
 
 foreach ($expected in $requiredText) {
     if (-not $script.Contains($expected)) {
         throw "start.ps1 does not include expected text: $expected"
     }
+}
+
+if ($script.Contains("Start-Sleep -Seconds 3")) {
+    throw "start.ps1 should wait for the frontend HTTP endpoint instead of sleeping for a fixed delay."
 }
 
 $forbiddenText = @(
