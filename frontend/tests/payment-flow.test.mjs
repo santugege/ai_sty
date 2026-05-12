@@ -46,7 +46,7 @@ test("zpay return page gives payment status handoff", () => {
   assert.match(source, /回到工作台/);
 });
 
-test("navigation includes billing entry for authenticated users", () => {
+test("navigation keeps billing entry in the admin-only items", () => {
   const source = readFileSync("src/components/app-nav.tsx", "utf8");
 
   assert.match(source, /href: "\/billing"/);

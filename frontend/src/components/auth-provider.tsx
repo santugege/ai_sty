@@ -24,6 +24,7 @@ type AuthContextValue = {
 };
 
 export const publicPaths = ["/login", "/register"];
+export const adminOnlyPaths = ["/", "/billing", "/admin"];
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -31,6 +32,15 @@ function isPublicRoute(pathname: string | null) {
   return publicPaths.some(
     (path) => pathname === path || pathname?.startsWith(`${path}/`),
   );
+}
+
+function isAdminOnlyRoute(pathname: string | null) {
+  return adminOnlyPaths.some((path) => {
+    if (path === "/") {
+      return pathname === "/";
+    }
+    return pathname === path || pathname?.startsWith(`${path}/`);
+  });
 }
 
 function nextPath(pathname: string | null) {
@@ -43,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPublicPath = isPublicRoute(pathname);
+  const isAdminOnlyPath = isAdminOnlyRoute(pathname);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -103,6 +114,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [isLoading, isPublicPath, pathname, router, user]);
 
+  useEffect(() => {
+    if (!isLoading && user && !user.isAdmin && isAdminOnlyPath) {
+      router.replace("/agent");
+    }
+  }, [isAdminOnlyPath, isLoading, router, user]);
+
   const value = useMemo(
     () => ({ user, isLoading, refreshUser, logout }),
     [user, isLoading, refreshUser, logout],
@@ -119,6 +136,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   if (!user && !isPublicPath) {
+    return <AuthContext.Provider value={value}>{null}</AuthContext.Provider>;
+  }
+
+  if (user && !user.isAdmin && isAdminOnlyPath) {
     return <AuthContext.Provider value={value}>{null}</AuthContext.Provider>;
   }
 

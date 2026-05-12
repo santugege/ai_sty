@@ -11,9 +11,14 @@ import {
 } from "react";
 import {
   AlertCircle,
+  Check,
+  Copy,
   ImagePlus,
+  Pencil,
   Plus,
+  RotateCcw,
   Send,
+  Square,
   X,
 } from "lucide-react";
 import {
@@ -130,6 +135,8 @@ export function AgentImageWorkbench({
 }: AgentImageWorkbenchProps) {
   const isCompact = variant === "compact";
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeStreamControllerRef = useRef<AbortController | null>(null);
   const requestSequenceRef = useRef(0);
   const isMountedRef = useRef(false);
   const selectedImagesRef = useRef<SelectedImage[]>([]);
@@ -147,6 +154,7 @@ export function AgentImageWorkbench({
   const [quality, setQuality] = useState<ImageQuality>("auto");
   const [previewImage, setPreviewImage] = useState<ConversationImage | null>(null);
   const [error, setError] = useState("");
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAwaitingAgentResponse, setIsAwaitingAgentResponse] = useState(false);
   const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
@@ -226,6 +234,8 @@ export function AgentImageWorkbench({
     return () => {
       isMountedRef.current = false;
       requestSequenceRef.current += 1;
+      activeStreamControllerRef.current?.abort();
+      activeStreamControllerRef.current = null;
     };
   }, []);
 
@@ -270,6 +280,10 @@ export function AgentImageWorkbench({
     }
   }
 
+  function focusComposer() {
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
   function removeSelectedImage(imageId: string) {
     setSelectedImages((previous) => {
       const removed = previous.find((image) => image.id === imageId);
@@ -283,6 +297,8 @@ export function AgentImageWorkbench({
   }
 
   async function handleSelectSession(sessionId: string) {
+    activeStreamControllerRef.current?.abort();
+    activeStreamControllerRef.current = null;
     const requestId = beginRequest();
     setError("");
     setActiveSessionId(sessionId);
@@ -307,6 +323,8 @@ export function AgentImageWorkbench({
   }
 
   function handleNewSession() {
+    activeStreamControllerRef.current?.abort();
+    activeStreamControllerRef.current = null;
     beginRequest();
     clearDraft();
     setActiveSessionId(null);
@@ -318,6 +336,75 @@ export function AgentImageWorkbench({
     setIsSubmitting(false);
     setIsAwaitingAgentResponse(false);
     setLoadingPhraseIndex(0);
+  }
+
+  async function handleCopyMessage(messageToCopy: ConversationMessage) {
+    const text = messageToCopy.content.trim();
+    if (!text) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard?.writeText(text);
+      setCopiedMessageId(messageToCopy.id);
+      window.setTimeout(() => setCopiedMessageId(null), 1600);
+    } catch {
+      setError("复制失败，请手动选择文本复制。");
+    }
+  }
+
+  function handleEditMessage(messageToEdit: ConversationMessage) {
+    if (isSubmitting || messageToEdit.role !== "user") {
+      return;
+    }
+
+    setMessage(messageToEdit.content);
+    setError("");
+    focusComposer();
+  }
+
+  function handleRegenerateMessage(messageToRegenerate: ConversationMessage) {
+    if (isSubmitting || messageToRegenerate.role !== "assistant") {
+      return;
+    }
+
+    const messageIndex = messages.findIndex(
+      (item) => item.id === messageToRegenerate.id,
+    );
+    const priorMessages =
+      messageIndex === -1 ? messages : messages.slice(0, messageIndex);
+    const previousUserMessage = [...priorMessages]
+      .reverse()
+      .find((item) => item.role === "user");
+    if (!previousUserMessage?.content.trim()) {
+      setError("没有可重新发送的上一条用户消息。");
+      return;
+    }
+
+    setMessage(previousUserMessage.content);
+    setError("");
+    focusComposer();
+  }
+
+  function handleContinueEditingImage(image: ConversationImage) {
+    if (isSubmitting) {
+      return;
+    }
+
+    setMessage(`基于这张图继续编辑：${image.prompt || "请描述要调整的地方"}`);
+    setError("");
+    focusComposer();
+  }
+
+  function handleStopGeneration() {
+    activeStreamControllerRef.current?.abort();
+    activeStreamControllerRef.current = null;
+    beginRequest();
+    setIsSubmitting(false);
+    setIsAwaitingAgentResponse(false);
+    setPendingUserMessage(null);
+    setStreamingAssistantMessage(null);
+    setError("已停止生成。");
   }
 
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
@@ -342,6 +429,9 @@ export function AgentImageWorkbench({
     setStreamingAssistantMessage(null);
     clearDraft(draftImages, false);
     const requestId = beginRequest();
+    const streamController = new AbortController();
+    activeStreamControllerRef.current = streamController;
+    const { signal } = streamController;
 
     try {
       let envelope: AgentEnvelope | null = null;
@@ -381,9 +471,9 @@ export function AgentImageWorkbench({
       };
 
       if (activeSessionId) {
-        await streamAgentSessionMessage(activeSessionId, formData, handleStreamEvent);
+        await streamAgentSessionMessage(activeSessionId, formData, handleStreamEvent, signal);
       } else {
-        await streamAgentSession(formData, handleStreamEvent);
+        await streamAgentSession(formData, handleStreamEvent, signal);
       }
       if (!envelope) {
         envelope = activeSessionId
@@ -427,6 +517,14 @@ export function AgentImageWorkbench({
       }
     } catch (caught) {
       if (isCurrentRequest(requestId)) {
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          setMessage(draftMessage);
+          setSelectedImages(draftImages);
+          setPendingUserMessage(null);
+          setStreamingAssistantMessage(null);
+          selectedImagesRef.current = draftImages;
+          return;
+        }
         setError(caught instanceof Error ? caught.message : "Agent 请求失败。");
         setMessage(draftMessage);
         setSelectedImages(draftImages);
@@ -436,6 +534,9 @@ export function AgentImageWorkbench({
       }
     } finally {
       if (isCurrentRequest(requestId)) {
+        if (activeStreamControllerRef.current === streamController) {
+          activeStreamControllerRef.current = null;
+        }
         setIsSubmitting(false);
         setIsAwaitingAgentResponse(false);
       }
@@ -561,6 +662,11 @@ export function AgentImageWorkbench({
                       key={item.id}
                       message={item}
                       onPreviewImage={setPreviewImage}
+                      onCopyMessage={() => void handleCopyMessage(item)}
+                      onEditMessage={() => handleEditMessage(item)}
+                      onRegenerateMessage={() => handleRegenerateMessage(item)}
+                      onContinueEditingImage={handleContinueEditingImage}
+                      copied={copiedMessageId === item.id}
                     />
                   ))}
                   {pendingUserMessage && (
@@ -568,6 +674,13 @@ export function AgentImageWorkbench({
                       key={pendingUserMessage.id}
                       message={pendingUserMessage}
                       onPreviewImage={setPreviewImage}
+                      onCopyMessage={() => void handleCopyMessage(pendingUserMessage)}
+                      onEditMessage={() => handleEditMessage(pendingUserMessage)}
+                      onRegenerateMessage={() =>
+                        handleRegenerateMessage(pendingUserMessage)
+                      }
+                      onContinueEditingImage={handleContinueEditingImage}
+                      copied={copiedMessageId === pendingUserMessage.id}
                     />
                   )}
                   {streamingAssistantMessage && (
@@ -575,6 +688,15 @@ export function AgentImageWorkbench({
                       key={streamingAssistantMessage.id}
                       message={streamingAssistantMessage}
                       onPreviewImage={setPreviewImage}
+                      onCopyMessage={() =>
+                        void handleCopyMessage(streamingAssistantMessage)
+                      }
+                      onEditMessage={() => handleEditMessage(streamingAssistantMessage)}
+                      onRegenerateMessage={() =>
+                        handleRegenerateMessage(streamingAssistantMessage)
+                      }
+                      onContinueEditingImage={handleContinueEditingImage}
+                      copied={copiedMessageId === streamingAssistantMessage.id}
                     />
                   )}
                   {isAwaitingAgentResponse && (
@@ -631,6 +753,7 @@ export function AgentImageWorkbench({
               )}
 
               <textarea
+                ref={textareaRef}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
@@ -664,14 +787,26 @@ export function AgentImageWorkbench({
                     PNG / JPG / WebP，图片会随本轮消息发送
                   </span>
                 </div>
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  title="发送"
-                  className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white transition-refined hover:bg-accent disabled:bg-paper-dim disabled:text-ink-lighter"
-                >
-                  <Send aria-hidden="true" className="h-4 w-4" />
-                </button>
+                {isSubmitting ? (
+                  <button
+                    type="button"
+                    onClick={handleStopGeneration}
+                    title="停止生成"
+                    aria-label="停止生成"
+                    className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white transition-refined hover:bg-coral"
+                  >
+                    <Square aria-hidden="true" className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    title="发送"
+                    className="grid h-9 w-9 place-items-center rounded-full bg-ink text-white transition-refined hover:bg-accent disabled:bg-paper-dim disabled:text-ink-lighter"
+                  >
+                    <Send aria-hidden="true" className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </form>
           </section>
@@ -724,9 +859,19 @@ function ReceivingBubble({ phrase }: { phrase: string }) {
 function MessageBubble({
   message,
   onPreviewImage,
+  onCopyMessage,
+  onEditMessage,
+  onRegenerateMessage,
+  onContinueEditingImage,
+  copied = false,
 }: {
   message: ConversationMessage;
   onPreviewImage: (image: ConversationImage) => void;
+  onCopyMessage: () => void;
+  onEditMessage: () => void;
+  onRegenerateMessage: () => void;
+  onContinueEditingImage: (image: ConversationImage) => void;
+  copied?: boolean;
 }) {
   const isUser = message.role === "user";
   const generatedImages =
@@ -768,6 +913,14 @@ function MessageBubble({
             {message.content}
           </p>
         )}
+        <MessageActionBar
+          isUser={isUser}
+          canCopy={message.content.trim().length > 0}
+          copied={copied}
+          onCopy={onCopyMessage}
+          onEdit={onEditMessage}
+          onRegenerate={onRegenerateMessage}
+        />
         {generatedImages.length > 0 && (
           <div className="mt-3 grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(14rem,1fr))]">
             {generatedImages.map((generatedImage, imageIndex) => (
@@ -792,11 +945,73 @@ function MessageBubble({
                   downloadName={`chatgpt-image-${generatedImage.id}`}
                   compact
                 />
+                <button
+                  type="button"
+                  onClick={() => onContinueEditingImage(generatedImage)}
+                  className="flex w-full items-center justify-center gap-2 border-t border-border bg-surface px-3 py-2 text-xs font-medium text-ink-light transition-refined hover:bg-accent-soft hover:text-accent"
+                >
+                  <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                  继续编辑
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+function MessageActionBar({
+  isUser,
+  canCopy,
+  copied,
+  onCopy,
+  onEdit,
+  onRegenerate,
+}: {
+  isUser: boolean;
+  canCopy: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  onEdit: () => void;
+  onRegenerate: () => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-ink-light">
+      {canCopy && (
+        <button
+          type="button"
+          onClick={onCopy}
+          className="inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-xs transition-refined hover:bg-paper-dim hover:text-ink"
+        >
+          {copied ? (
+            <Check aria-hidden="true" className="h-3.5 w-3.5" />
+          ) : (
+            <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+          )}
+          {copied ? "已复制" : "复制"}
+        </button>
+      )}
+      {isUser ? (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-xs transition-refined hover:bg-paper-dim hover:text-ink"
+        >
+          <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+          编辑再发
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onRegenerate}
+          className="inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-xs transition-refined hover:bg-paper-dim hover:text-ink"
+        >
+          <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+          重新生成
+        </button>
+      )}
+    </div>
   );
 }

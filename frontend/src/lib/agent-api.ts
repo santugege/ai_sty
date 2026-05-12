@@ -86,12 +86,14 @@ export async function createAgentSession(formData: FormData) {
 export async function streamAgentSession(
   formData: FormData,
   onEvent: (event: AgentStreamEvent) => void,
+  signal?: AbortSignal,
 ) {
   return readAgentStream(
     await fetch(`${apiBaseUrl}/api/agent/sessions/stream`, {
       method: "POST",
       credentials: "include",
       body: formData,
+      signal,
     }),
     onEvent,
   );
@@ -125,6 +127,7 @@ export async function streamAgentSessionMessage(
   sessionId: string,
   formData: FormData,
   onEvent: (event: AgentStreamEvent) => void,
+  signal?: AbortSignal,
 ) {
   const encodedSessionId = encodeURIComponent(sessionId);
   return readAgentStream(
@@ -134,6 +137,7 @@ export async function streamAgentSessionMessage(
         method: "POST",
         credentials: "include",
         body: formData,
+        signal,
       },
     ),
     onEvent,

@@ -167,6 +167,40 @@ test("agent api client parses server-sent stream events", async (t) => {
   assert.equal(events[2].data.conversation.id, "session-1");
 });
 
+test("agent api client can abort streamed session requests", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      method: init?.method,
+      signal: init?.signal,
+    });
+    return new Response("", {
+      headers: { "content-type": "text/event-stream" },
+      status: 200,
+    });
+  };
+
+  const { streamAgentSession, streamAgentSessionMessage } =
+    await importAgentApiClient();
+  const controller = new AbortController();
+  await streamAgentSession(new FormData(), () => undefined, controller.signal);
+  await streamAgentSessionMessage(
+    "session-1",
+    new FormData(),
+    () => undefined,
+    controller.signal,
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].signal, controller.signal);
+  assert.equal(calls[1].signal, controller.signal);
+});
+
 test("agent workbench renders session list and sends to active session", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
@@ -294,6 +328,38 @@ test("agent workbench appends streamed assistant deltas before final envelope", 
   assert.match(source, /assistant_delta/);
   assert.match(source, /setStreamingAssistantMessage/);
   assert.match(source, /streamingAssistantMessage && \([\s\S]*<MessageBubble/);
+});
+
+test("agent workbench exposes ChatGPT-style message actions", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /handleCopyMessage/);
+  assert.match(source, /handleEditMessage/);
+  assert.match(source, /handleRegenerateMessage/);
+  assert.match(source, /MessageActionBar/);
+  assert.match(source, /复制/);
+  assert.match(source, /编辑再发/);
+  assert.match(source, /重新生成/);
+});
+
+test("agent workbench can stop a streaming generation request", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /AbortController/);
+  assert.match(source, /activeStreamControllerRef/);
+  assert.match(source, /handleStopGeneration/);
+  assert.match(source, /streamAgentSessionMessage\(activeSessionId, formData, handleStreamEvent, signal\)/);
+  assert.match(source, /streamAgentSession\(formData, handleStreamEvent, signal\)/);
+  assert.match(source, /停止生成/);
+});
+
+test("agent generated images expose a continue editing entry", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /handleContinueEditingImage/);
+  assert.match(source, /onContinueEditingImage/);
+  assert.match(source, /继续编辑/);
+  assert.match(source, /基于这张图继续编辑/);
 });
 
 test("agent workbench does not render a dedicated current image context panel", () => {

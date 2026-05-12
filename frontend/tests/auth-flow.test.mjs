@@ -182,6 +182,18 @@ test("auth provider protects private routes and leaves login register public", (
   assert.match(source, /finally[\s\S]*setUser\(null\)[\s\S]*router\.replace\("\/login"\)/);
 });
 
+test("auth provider redirects regular users away from admin-only routes", () => {
+  const source = readFileSync("src/components/auth-provider.tsx", "utf8");
+
+  assert.match(source, /adminOnlyPaths/);
+  assert.match(source, /"\/"/);
+  assert.match(source, /"\/billing"/);
+  assert.match(source, /"\/admin"/);
+  assert.match(source, /isAdminOnlyRoute/);
+  assert.match(source, /user && !user\.isAdmin/);
+  assert.match(source, /router\.replace\("\/agent"\)/);
+});
+
 test("login and register pages submit account forms", () => {
   const loginSource = readFileSync("src/app/login/page.tsx", "utf8");
   const registerSource = readFileSync("src/app/register/page.tsx", "utf8");
@@ -214,12 +226,19 @@ test("login next redirect is constrained to safe local paths", async () => {
   assert.equal(safeNextPath("/%5cevil.com/path"), "/");
 });
 
-test("app navigation hides account management from regular users", () => {
+test("app navigation hides admin-only product, billing, and account management from regular users", () => {
   const source = readFileSync("src/components/app-nav.tsx", "utf8");
 
   assert.match(source, /user\?\.isAdmin/);
+  assert.match(source, /regularItems/);
+  assert.match(source, /adminOnlyItems/);
+  assert.match(source, /href: "\/"/);
+  assert.match(source, /商品图/);
+  assert.match(source, /href: "\/billing"/);
+  assert.match(source, /账户充值/);
   assert.match(source, /\/admin\/accounts/);
   assert.match(source, /账号管理/);
+  assert.match(source, /user\?\.isAdmin \? \[\.\.\.adminOnlyItems, \.\.\.regularItems\] : regularItems/);
   assert.match(source, /logout/);
   assert.match(source, /mobileNav/);
   assert.match(source, /xl:hidden/);

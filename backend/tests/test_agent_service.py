@@ -897,6 +897,40 @@ def test_persistent_generate_turn_starts_multiple_image_calls_concurrently():
     assert len(envelope.messages[-1].images) == 4
 
 
+@pytest.mark.parametrize(
+    ("message", "expected_count"),
+    [
+        ("生成5张适用于拼多多的主图。", 5),
+        ("生成10张适用于拼多多的主图。", 10),
+        ("生成五张适用于拼多多的主图。", 5),
+        ("生成十张适用于拼多多的主图。", 10),
+    ],
+)
+def test_persistent_generate_turn_supports_requested_image_counts_up_to_ten(
+    message, expected_count
+):
+    tool = ConcurrentTool(expected_calls=expected_count)
+    service, _planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="generate",
+            assistant_message=f"I created {expected_count} versions.",
+            tool_name="chatgpt_image_generate",
+            tool_instruction="Create several different ecommerce main images.",
+            response_id="resp_generate",
+        ),
+        tool=tool,
+    )
+
+    envelope = service.create_session(
+        message=message,
+        attachments=[],
+        size="1536x1024",
+    )
+
+    assert len(tool.calls) == expected_count
+    assert len(envelope.messages[-1].images) == expected_count
+
+
 def test_failed_persistent_edit_with_unavailable_tool_rolls_back_upload_side_effects():
     repo = make_repo()
     session = repo.create_session("Bad tool")

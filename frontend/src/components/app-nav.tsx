@@ -12,15 +12,15 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 
-const baseItems = [
+const adminOnlyItems = [
   { label: "商品图", href: "/", icon: Package },
-  { label: "ChatGPT 对话", href: "/agent", icon: MessageSquareText },
   { label: "账户充值", href: "/billing", icon: WalletCards },
-];
-
-const adminItems = [
   { label: "订阅管理", href: "/admin/subscriptions", icon: ListChecks },
   { label: "账号管理", href: "/admin/accounts", icon: ShieldCheck },
+];
+
+const regularItems = [
+  { label: "ChatGPT 对话", href: "/agent", icon: MessageSquareText },
 ];
 
 function isActivePath(pathname: string | null, href: string) {
@@ -33,7 +33,7 @@ function isActivePath(pathname: string | null, href: string) {
 export function AppNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const items = user?.isAdmin ? [...baseItems, ...adminItems] : baseItems;
+  const items = user?.isAdmin ? [...adminOnlyItems, ...regularItems] : regularItems;
 
   return (
     <>
