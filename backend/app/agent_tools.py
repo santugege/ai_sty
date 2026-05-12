@@ -11,6 +11,9 @@ from openai import OpenAI
 
 from app.config import openai_client_kwargs
 
+DEFAULT_AGENT_IMAGE_QUALITY = "auto"
+SUPPORTED_AGENT_IMAGE_QUALITIES = ("auto", "low", "medium", "high")
+
 
 @dataclass(frozen=True)
 class AgentToolContext:
@@ -19,6 +22,7 @@ class AgentToolContext:
     mime_type: str
     instruction: str
     size: str
+    quality: str = DEFAULT_AGENT_IMAGE_QUALITY
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,7 @@ class AgentTool(Protocol):
 
 
 class ImageClient(Protocol):
-    def generate(self, instruction: str, size: str) -> bytes:
+    def generate(self, instruction: str, size: str, quality: str) -> bytes:
         ...
 
     def edit(self, context: AgentToolContext) -> bytes:
@@ -61,13 +65,18 @@ class OpenAIImageClient:
     base_url: str | None = None
     client_factory: Callable[..., Any] = OpenAI
 
-    def generate(self, instruction: str, size: str) -> bytes:
+    def generate(
+        self,
+        instruction: str,
+        size: str,
+        quality: str = DEFAULT_AGENT_IMAGE_QUALITY,
+    ) -> bytes:
         client = self.client_factory(**openai_client_kwargs(self.api_key, self.base_url))
         response = client.images.generate(
             model=self.image_model,
             prompt=instruction,
             size=size,
-            quality="high",
+            quality=normalize_agent_image_quality(quality),
         )
         return _decode_first_image(response)
 
@@ -80,7 +89,7 @@ class OpenAIImageClient:
             image=image_file,
             prompt=context.instruction,
             size=context.size,
-            quality="high",
+            quality=normalize_agent_image_quality(context.quality),
         )
         return _decode_first_image(response)
 
@@ -98,7 +107,11 @@ class ChatGptImageGenerateTool:
         self.image_model = image_model or os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
     def execute(self, context: AgentToolContext) -> AgentToolResult:
-        image_bytes = self._image_client.generate(context.instruction, context.size)
+        image_bytes = self._image_client.generate(
+            context.instruction,
+            context.size,
+            context.quality,
+        )
         return AgentToolResult(
             image_bytes=image_bytes,
             mime_type="image/png",
@@ -143,6 +156,13 @@ def create_openai_image_client(
         base_url=base_url,
         client_factory=client_factory,
     )
+
+
+def normalize_agent_image_quality(quality: str | None) -> str:
+    normalized = (quality or "").strip().lower()
+    if normalized in SUPPORTED_AGENT_IMAGE_QUALITIES:
+        return normalized
+    return DEFAULT_AGENT_IMAGE_QUALITY
 
 
 def _decode_first_image(response: Any) -> bytes:

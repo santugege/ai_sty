@@ -33,8 +33,12 @@ import {
   GeneratedImageActions,
   ImagePreviewDialog,
 } from "@/components/generated-image-actions";
-
-const imageSizes = ["1024x1024", "1536x1024", "1024x1536"] as const;
+import {
+  imageQualities,
+  imageSizes,
+  type ImageQuality,
+  type ImageSize,
+} from "@/lib/tools";
 
 type AgentImageWorkbenchVariant = "full" | "compact";
 
@@ -49,6 +53,12 @@ type SelectedImage = {
 };
 
 const agentLoadingPhrases = ["生成图片", "添加细节", "润色画面", "保存图片"] as const;
+const imageQualityLabels: Record<ImageQuality, string> = {
+  auto: "自动质量",
+  low: "低质量",
+  medium: "中等质量",
+  high: "高质量",
+};
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -85,6 +95,7 @@ function createPendingUserMessage(
     responseId: null,
     imageVersionId: images.at(-1)?.id ?? null,
     image: null,
+    images: [],
     createdAt,
   };
 }
@@ -98,6 +109,7 @@ function createStreamingAssistantMessage(): ConversationMessage {
     responseId: null,
     imageVersionId: null,
     image: null,
+    images: [],
     createdAt: new Date().toISOString(),
   };
 }
@@ -131,7 +143,8 @@ export function AgentImageWorkbench({
   const [streamingAssistantMessage, setStreamingAssistantMessage] =
     useState<ConversationMessage | null>(null);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
-  const [size, setSize] = useState<(typeof imageSizes)[number]>("1536x1024");
+  const [size, setSize] = useState<ImageSize>("1536x1024");
+  const [quality, setQuality] = useState<ImageQuality>("auto");
   const [previewImage, setPreviewImage] = useState<ConversationImage | null>(null);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -318,6 +331,7 @@ export function AgentImageWorkbench({
     const formData = new FormData();
     formData.append("message", draftMessage);
     formData.append("size", size);
+    formData.append("quality", quality);
     draftImages.forEach((image) => formData.append("images", image.file));
 
     setError("");
@@ -502,23 +516,40 @@ export function AgentImageWorkbench({
                 多会话持久上下文，支持图片上传与连续编辑
               </p>
             </div>
-            <label className="text-xs text-ink-light">
-              <span className="sr-only">输出尺寸</span>
-              <select
-                value={size}
-                onChange={(event) =>
-                  setSize(event.target.value as (typeof imageSizes)[number])
-                }
-                disabled={isSubmitting}
-                className="h-9 rounded-md border border-border bg-surface px-2 text-xs outline-none transition-refined focus:border-ink"
-              >
-                {imageSizes.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <label className="text-xs text-ink-light">
+                <span className="sr-only">输出尺寸</span>
+                <select
+                  value={size}
+                  onChange={(event) => setSize(event.target.value as ImageSize)}
+                  disabled={isSubmitting}
+                  className="h-9 rounded-md border border-border bg-surface px-2 text-xs outline-none transition-refined focus:border-ink"
+                >
+                  {imageSizes.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-ink-light">
+                <span className="sr-only">图片质量</span>
+                <select
+                  value={quality}
+                  onChange={(event) =>
+                    setQuality(event.target.value as ImageQuality)
+                  }
+                  disabled={isSubmitting}
+                  className="h-9 rounded-md border border-border bg-surface px-2 text-xs outline-none transition-refined focus:border-ink"
+                >
+                  {imageQualities.map((option) => (
+                    <option key={option} value={option}>
+                      {imageQualityLabels[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </header>
 
           <section className="flex min-h-0 flex-1 flex-col">
@@ -698,7 +729,12 @@ function MessageBubble({
   onPreviewImage: (image: ConversationImage) => void;
 }) {
   const isUser = message.role === "user";
-  const generatedImage = message.image ?? null;
+  const generatedImages =
+    message.images && message.images.length > 0
+      ? message.images
+      : message.image
+        ? [message.image]
+        : [];
 
   return (
     <article
@@ -732,25 +768,32 @@ function MessageBubble({
             {message.content}
           </p>
         )}
-        {generatedImage && (
-          <div className="relative mt-3 overflow-hidden rounded-lg border border-border bg-surface-soft">
-            <button
-              type="button"
-              onClick={() => onPreviewImage(generatedImage)}
-              className="block w-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan/40"
-            >
-              <img
-                src={generatedImage.src}
-                alt="ChatGPT 生成的图片"
-                className="max-h-[32rem] w-full object-contain transition-refined hover:brightness-95"
-              />
-            </button>
-            <GeneratedImageActions
-              image={generatedImage}
-              onPreview={() => onPreviewImage(generatedImage)}
-              downloadName={`chatgpt-image-${generatedImage.id}`}
-              compact
-            />
+        {generatedImages.length > 0 && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(14rem,1fr))]">
+            {generatedImages.map((generatedImage, imageIndex) => (
+              <div
+                key={generatedImage.id}
+                className="relative overflow-hidden rounded-lg border border-border bg-surface-soft"
+              >
+                <button
+                  type="button"
+                  onClick={() => onPreviewImage(generatedImage)}
+                  className="block w-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan/40"
+                >
+                  <img
+                    src={generatedImage.src}
+                    alt={`ChatGPT generated image ${imageIndex + 1}`}
+                    className="max-h-[32rem] w-full object-contain transition-refined hover:brightness-95"
+                  />
+                </button>
+                <GeneratedImageActions
+                  image={generatedImage}
+                  onPreview={() => onPreviewImage(generatedImage)}
+                  downloadName={`chatgpt-image-${generatedImage.id}`}
+                  compact
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>

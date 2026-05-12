@@ -15,6 +15,7 @@ from app.user_models import UserRow
 
 
 client = TestClient(app)
+CURRENT_USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 TINY_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AwAI/AL+p5qgoAAAAABJRU5ErkJggg=="
 )
@@ -40,6 +41,7 @@ def override_db_session(db):
 
 def override_current_user():
     return UserRow(
+        id=CURRENT_USER_ID,
         email="tester@example.com",
         username="tester",
         password_hash="hash",
@@ -134,8 +136,8 @@ def test_build_agent_service_wires_persistent_dependencies(monkeypatch):
     summary_calls = []
 
     class FakeRepo:
-        def __init__(self, session):
-            repo_calls.append(session)
+        def __init__(self, session, user_id=None):
+            repo_calls.append({"session": session, "user_id": user_id})
 
     class FakeTool:
         def __init__(self, image_client, image_model):
@@ -167,7 +169,7 @@ def test_build_agent_service_wires_persistent_dependencies(monkeypatch):
 
     service = app_main.build_agent_service(db)
 
-    assert repo_calls == [db]
+    assert repo_calls == [{"session": db, "user_id": None}]
     assert service.storage is storage
     assert "chatgpt_image_generate" in service.tools
     assert "chatgpt_image_edit" in service.tools
@@ -195,8 +197,9 @@ def test_build_agent_service_defaults_to_gpt_5_4_mini_agent_model(monkeypatch):
     summary_calls = []
 
     class FakeRepo:
-        def __init__(self, session):
+        def __init__(self, session, user_id=None):
             self.session = session
+            self.user_id = user_id
 
     monkeypatch.setattr(app_main, "AgentRepository", FakeRepo, raising=False)
     monkeypatch.setattr(
@@ -252,14 +255,19 @@ def test_create_session_route_accepts_message_size_and_multiple_images(
             return {"conversation": {"id": "session-1"}, "messages": []}
 
     class FakeService:
-        def create_session(self, message, attachments, size):
+        def create_session(self, message, attachments, size, quality):
             service_calls.append(
-                {"message": message, "attachments": attachments, "size": size}
+                {
+                    "message": message,
+                    "attachments": attachments,
+                    "size": size,
+                    "quality": quality,
+                }
             )
             return FakeEnvelope()
 
-    def build_service(session):
-        build_calls.append(session)
+    def build_service(session, user_id=None):
+        build_calls.append({"session": session, "user_id": user_id})
         return FakeService()
 
     override_db_session(db)
@@ -268,7 +276,7 @@ def test_create_session_route_accepts_message_size_and_multiple_images(
     try:
         response = client.post(
             "/api/agent/sessions",
-            data={"message": "start session", "size": "1024x1024"},
+            data={"message": "start session", "size": "1024x1024", "quality": "medium"},
             files=[
                 ("images", ("first.png", TINY_PNG, "image/png")),
                 ("images", ("second.png", TINY_PNG, "image/png")),
@@ -279,7 +287,7 @@ def test_create_session_route_accepts_message_size_and_multiple_images(
 
     assert response.status_code == 200
     assert response.json() == {"conversation": {"id": "session-1"}, "messages": []}
-    assert build_calls == [db]
+    assert build_calls == [{"session": db, "user_id": CURRENT_USER_ID}]
     assert service_calls == [
         {
             "message": "start session",
@@ -296,6 +304,7 @@ def test_create_session_route_accepts_message_size_and_multiple_images(
                 },
             ],
             "size": "1024x1024",
+            "quality": "medium",
         }
     ]
 
@@ -306,10 +315,11 @@ def test_create_session_stream_route_returns_server_sent_events(
     db = object()
 
     class FakeService:
-        def stream_create_session(self, message, attachments, size):
+        def stream_create_session(self, message, attachments, size, quality):
             assert message == "stream this"
             assert attachments == []
             assert size == "1024x1024"
+            assert quality == "low"
             yield {"event": "assistant_delta", "data": {"delta": "Hello"}}
             yield {
                 "event": "final",
@@ -318,12 +328,15 @@ def test_create_session_stream_route_returns_server_sent_events(
 
     override_db_session(db)
     monkeypatch.setattr(
-        app_main, "build_agent_service", lambda session: FakeService(), raising=False
+        app_main,
+        "build_agent_service",
+        lambda session, user_id=None: FakeService(),
+        raising=False,
     )
     try:
         response = client.post(
             "/api/agent/sessions/stream",
-            data={"message": "stream this", "size": "1024x1024"},
+            data={"message": "stream this", "size": "1024x1024", "quality": "low"},
         )
     finally:
         app.dependency_overrides.pop(get_db_session, None)
@@ -346,8 +359,8 @@ def test_list_sessions_route_returns_service_json(monkeypatch, authenticated_use
         def list_sessions(self):
             return FakeEnvelope()
 
-    def build_service(session):
-        build_calls.append(session)
+    def build_service(session, user_id=None):
+        build_calls.append({"session": session, "user_id": user_id})
         return FakeService()
 
     override_db_session(db)
@@ -360,7 +373,37 @@ def test_list_sessions_route_returns_service_json(monkeypatch, authenticated_use
 
     assert response.status_code == 200
     assert response.json() == {"sessions": [{"id": "session-1", "title": "One"}]}
-    assert build_calls == [db]
+    assert build_calls == [{"session": db, "user_id": CURRENT_USER_ID}]
+
+
+def test_list_sessions_route_builds_service_for_current_user(
+    monkeypatch, authenticated_user
+):
+    db = object()
+    build_calls = []
+
+    class FakeEnvelope:
+        def model_dump(self, mode):
+            return {"sessions": []}
+
+    class FakeService:
+        def list_sessions(self):
+            return FakeEnvelope()
+
+    def build_service(*args):
+        build_calls.append(args)
+        return FakeService()
+
+    override_db_session(db)
+    forbid_threadpool(monkeypatch)
+    monkeypatch.setattr(app_main, "build_agent_service", build_service, raising=False)
+    try:
+        response = client.get("/api/agent/sessions")
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+    assert response.status_code == 200
+    assert build_calls == [(db, CURRENT_USER_ID)]
 
 
 def test_get_session_route_passes_uuid_to_service(monkeypatch, authenticated_user):
@@ -380,7 +423,10 @@ def test_get_session_route_passes_uuid_to_service(monkeypatch, authenticated_use
     override_db_session(db)
     forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
-        app_main, "build_agent_service", lambda session: FakeService(), raising=False
+        app_main,
+        "build_agent_service",
+        lambda session, user_id=None: FakeService(),
+        raising=False,
     )
     try:
         response = client.get(f"/api/agent/sessions/{session_id}")
@@ -404,13 +450,14 @@ def test_session_message_route_passes_uuid_message_size_and_images(
             return {"conversation": {"id": str(session_id)}, "messages": []}
 
     class FakeService:
-        def send_session_message(self, session_uuid, message, attachments, size):
+        def send_session_message(self, session_uuid, message, attachments, size, quality):
             service_calls.append(
                 {
                     "session_id": session_uuid,
                     "message": message,
                     "attachments": attachments,
                     "size": size,
+                    "quality": quality,
                 }
             )
             return FakeEnvelope()
@@ -418,12 +465,15 @@ def test_session_message_route_passes_uuid_message_size_and_images(
     override_db_session(db)
     forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
-        app_main, "build_agent_service", lambda session: FakeService(), raising=False
+        app_main,
+        "build_agent_service",
+        lambda session, user_id=None: FakeService(),
+        raising=False,
     )
     try:
         response = client.post(
             f"/api/agent/sessions/{session_id}/messages",
-            data={"message": "edit this", "size": "1536x1024"},
+            data={"message": "edit this", "size": "1536x1024", "quality": "high"},
             files={"images": ("product.png", TINY_PNG, "image/png")},
         )
     finally:
@@ -443,6 +493,7 @@ def test_session_message_route_passes_uuid_message_size_and_images(
                 }
             ],
             "size": "1536x1024",
+            "quality": "high",
         }
     ]
 
@@ -451,13 +502,16 @@ def test_session_route_uses_agent_error_response(monkeypatch, authenticated_user
     db = object()
 
     class FakeService:
-        def create_session(self, message, attachments, size):
+        def create_session(self, message, attachments, size, quality):
             raise AgentInputError("bad session input")
 
     override_db_session(db)
     forbid_threadpool(monkeypatch)
     monkeypatch.setattr(
-        app_main, "build_agent_service", lambda session: FakeService(), raising=False
+        app_main,
+        "build_agent_service",
+        lambda session, user_id=None: FakeService(),
+        raising=False,
     )
     try:
         response = client.post(

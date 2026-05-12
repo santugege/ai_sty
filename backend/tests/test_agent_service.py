@@ -17,6 +17,8 @@ from app.agent_tools import AgentToolContext, AgentToolResult
 from app.db import Base
 from app.image_storage import StoredImage
 
+USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
 
 def test_agent_service_has_no_legacy_in_memory_conversation_flow():
     source = Path("backend/app/agent_service.py").read_text(encoding="utf-8")
@@ -165,7 +167,7 @@ class FailingReadStorage(FakeImageStorage):
 def make_repo() -> AgentRepository:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    return AgentRepository(Session(engine))
+    return AgentRepository(Session(engine), user_id=USER_ID)
 
 
 def make_persistent_service(
@@ -232,6 +234,38 @@ def test_create_session_persists_conversation_and_uploaded_image():
     assert len(storage.objects) == 1
     assert state.session.current_version_id == state.versions[0].id
     assert envelope.messages[0].imageVersionId == str(state.versions[0].id)
+
+
+def test_create_session_passes_uploaded_image_bytes_to_planner():
+    service, planner_calls, _tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="answer",
+            assistant_message="I can see the uploaded image.",
+            tool_name=None,
+            tool_instruction=None,
+            response_id="resp_1",
+        )
+    )
+
+    service.create_session(
+        message="Based on this photo, make it Korean style.",
+        attachments=[
+            {
+                "image_bytes": b"input-image",
+                "image_name": "scene.png",
+                "mime_type": "image/png",
+            }
+        ],
+        size="1536x1024",
+    )
+
+    assert planner_calls[0]["image_inputs"] == [
+        {
+            "image_bytes": b"input-image",
+            "mime_type": "image/png",
+            "name": "scene.png",
+        }
+    ]
 
 
 def test_stream_create_session_emits_session_user_delta_and_final_events():
@@ -623,6 +657,41 @@ def test_persistent_edit_turn_uses_stored_current_image_and_persists_generated_v
     assert assistant_message.image.src.endswith("ZWRpdGVkLWltYWdl")
 
 
+def test_follow_up_message_passes_current_image_bytes_to_planner():
+    service, planner_calls, _tool, _storage = make_persistent_service(
+        [
+            ConversationTurnDecision("answer", "Ready.", None, None, "resp_1"),
+            ConversationTurnDecision("answer", "I can see the current image.", None, None, "resp_2"),
+        ]
+    )
+    envelope = service.create_session(
+        "Use this scene.",
+        [
+            {
+                "image_bytes": b"input-image",
+                "image_name": "scene.png",
+                "mime_type": "image/png",
+            }
+        ],
+        "1536x1024",
+    )
+
+    service.send_session_message(
+        session_id=envelope.conversation.id,
+        message="Based on the photo scene, change it to Korean style.",
+        attachments=[],
+        size="1536x1024",
+    )
+
+    assert planner_calls[1]["image_inputs"] == [
+        {
+            "image_bytes": b"input-image",
+            "mime_type": "image/png",
+            "name": "current-image.png",
+        }
+    ]
+
+
 def test_failed_persistent_edit_without_current_image_rolls_back_user_message():
     repo = make_repo()
     session = repo.create_session("No image")
@@ -677,6 +746,27 @@ def test_persistent_generate_turn_does_not_require_current_image():
     assistant_message = envelope.messages[-1]
     assert assistant_message.image is not None
     assert assistant_message.image.prompt == "Create a mountain lake."
+
+
+def test_persistent_generate_turn_passes_selected_quality_to_tool():
+    service, _planner_calls, tool, _storage = make_persistent_service(
+        ConversationTurnDecision(
+            action="generate",
+            assistant_message="I created it.",
+            tool_name="chatgpt_image_generate",
+            tool_instruction="Create a mountain lake.",
+            response_id="resp_generate",
+        )
+    )
+
+    service.create_session(
+        message="Generate a mountain lake.",
+        attachments=[],
+        size="1536x1024",
+        quality="medium",
+    )
+
+    assert tool.calls[-1].quality == "medium"
 
 
 def test_persistent_generate_turn_splits_requested_multiple_images():
@@ -765,7 +855,10 @@ def test_persistent_edit_turn_splits_requested_multiple_images_from_current_imag
     assert "Standalone output 1 of 2" in tool.calls[0].instruction
     assert "Standalone output 2 of 2" in tool.calls[1].instruction
     assert len(state.versions) == 3
-    generated_versions = state.versions[-2:]
+    assistant_row = state.messages[-1]
+    linked_version_ids = state.message_image_versions[assistant_row.id]
+    versions_by_id = {version.id: version for version in state.versions}
+    generated_versions = [versions_by_id[version_id] for version_id in linked_version_ids]
     assert [version.parent_version_id for version in generated_versions] == [
         state.versions[0].id,
         state.versions[0].id,

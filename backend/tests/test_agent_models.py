@@ -21,6 +21,7 @@ def test_base_metadata_includes_agent_tables():
 def test_agent_session_columns():
     assert {
         "id",
+        "user_id",
         "title",
         "current_version_id",
         "previous_response_id",

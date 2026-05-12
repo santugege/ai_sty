@@ -28,6 +28,7 @@ export type ConversationMessage = {
   responseId?: string | null;
   imageVersionId?: string | null;
   image?: ConversationImage | null;
+  images?: ConversationImage[];
   createdAt: string;
 };
 

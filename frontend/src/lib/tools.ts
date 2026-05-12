@@ -8,7 +8,10 @@ export const imageSizes = [
   "2160x3840",
 ] as const;
 
+export const imageQualities = ["auto", "low", "medium", "high"] as const;
+
 export type ImageSize = (typeof imageSizes)[number];
+export type ImageQuality = (typeof imageQualities)[number];
 export type ToolId = "product";
 
 export type ImageTool = {

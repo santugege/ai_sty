@@ -14,7 +14,7 @@ from app.agent_schemas import AgentEnvelope
 
 
 class FakeImageClient:
-    def generate(self, instruction: str, size: str) -> bytes:
+    def generate(self, instruction: str, size: str, quality: str) -> bytes:
         return b"generated"
 
     def edit(self, context: AgentToolContext) -> bytes:
@@ -97,6 +97,36 @@ def test_chatgpt_image_generate_tool_uses_openai_image_model_env(monkeypatch):
 
     assert result.image_bytes == b"generated"
     assert result.model == "custom-image-model"
+
+
+def test_chatgpt_image_generate_tool_passes_selected_quality():
+    calls = []
+
+    class FakeTrackingImageClient:
+        def generate(self, instruction: str, size: str, quality: str) -> bytes:
+            calls.append({"instruction": instruction, "size": size, "quality": quality})
+            return b"generated"
+
+    context = AgentToolContext(
+        image_bytes=b"",
+        image_name="generated-image.png",
+        mime_type="image/png",
+        instruction="Create a quiet mountain lake.",
+        size="1024x1024",
+        quality="medium",
+    )
+    tool = ChatGptImageGenerateTool(image_client=FakeTrackingImageClient())
+
+    result = tool.execute(context)
+
+    assert result.image_bytes == b"generated"
+    assert calls == [
+        {
+            "instruction": "Create a quiet mountain lake.",
+            "size": "1024x1024",
+            "quality": "medium",
+        }
+    ]
 
 
 def test_create_openai_image_client_passes_base_url_to_client_factory():
@@ -215,11 +245,11 @@ def test_create_openai_image_client_edits_image_with_gpt_image_2():
     assert fake_client.images.edit_kwargs["model"] == "gpt-image-2"
     assert fake_client.images.edit_kwargs["prompt"] == "Make it brighter"
     assert fake_client.images.edit_kwargs["size"] == "1536x1024"
-    assert fake_client.images.edit_kwargs["quality"] == "high"
+    assert fake_client.images.edit_kwargs["quality"] == "auto"
     assert fake_client.images.edit_kwargs["image"].name == "product.png"
 
 
-def test_create_openai_image_client_generates_image_with_high_quality():
+def test_create_openai_image_client_generates_image_with_selected_quality():
     class FakeImages:
         def __init__(self):
             self.generate_kwargs = None
@@ -239,16 +269,16 @@ def test_create_openai_image_client_generates_image_with_high_quality():
         client_factory=lambda api_key: fake_client,
     )
 
-    result = image_client.generate("Create a mountain lake.", "1536x1024")
+    result = image_client.generate("Create a mountain lake.", "1536x1024", "medium")
 
     assert result == b"generated"
     assert fake_client.images.generate_kwargs["model"] == "gpt-image-2"
     assert fake_client.images.generate_kwargs["prompt"] == "Create a mountain lake."
     assert fake_client.images.generate_kwargs["size"] == "1536x1024"
-    assert fake_client.images.generate_kwargs["quality"] == "high"
+    assert fake_client.images.generate_kwargs["quality"] == "medium"
 
 
-def test_create_openai_image_client_edits_image_with_high_quality():
+def test_create_openai_image_client_edits_image_with_selected_quality():
     class FakeImages:
         def __init__(self):
             self.edit_kwargs = None
@@ -275,11 +305,12 @@ def test_create_openai_image_client_edits_image_with_high_quality():
             mime_type="image/png",
             instruction="Make the sky warmer.",
             size="1536x1024",
+            quality="low",
         )
     )
 
     assert result == b"edited"
-    assert fake_client.images.edit_kwargs["quality"] == "high"
+    assert fake_client.images.edit_kwargs["quality"] == "low"
     assert fake_client.images.edit_kwargs["prompt"] == "Make the sky warmer."
 
 

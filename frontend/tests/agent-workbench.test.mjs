@@ -223,6 +223,25 @@ test("agent workbench renders a ChatGPT-style conversation composer", () => {
   assert.doesNotMatch(source, /handleRestore/);
 });
 
+test("agent workbench sends configurable image quality and shared product sizes", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+  const toolsSource = readFileSync("src/lib/tools.ts", "utf8");
+
+  assert.match(source, /imageSizes/);
+  assert.match(source, /imageQualities/);
+  assert.match(source, /useState<ImageSize>\("1536x1024"\)/);
+  assert.match(source, /useState<ImageQuality>\("auto"\)/);
+  assert.match(source, /formData\.append\("quality", quality\)/);
+  assert.match(source, /setQuality\(event\.target\.value as ImageQuality\)/);
+  assert.match(toolsSource, /export const imageQualities = \[/);
+  assert.match(toolsSource, /"2048x2048"/);
+  assert.match(toolsSource, /"3840x2160"/);
+  assert.doesNotMatch(
+    source,
+    /const imageSizes = \["1024x1024", "1536x1024", "1024x1536"\] as const/,
+  );
+});
+
 test("agent workbench shows receiving state in the message stream after submit", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 

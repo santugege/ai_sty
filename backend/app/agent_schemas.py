@@ -55,6 +55,7 @@ class ConversationMessageDto(BaseModel):
     responseId: str | None = None
     imageVersionId: str | None = None
     image: ConversationImageDto | None = None
+    images: list[ConversationImageDto] = []
     createdAt: datetime
 
 

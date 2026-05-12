@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -110,6 +111,7 @@ def request_conversation_turn(
     uploaded_image_count: int,
     previous_response_id: str | None,
     summary: str | None = None,
+    image_inputs: list[dict[str, object]] | None = None,
     base_url: str | None = None,
     client_factory: type[Any] = OpenAI,
 ) -> ConversationTurnDecision:
@@ -123,6 +125,7 @@ def request_conversation_turn(
             recent_messages=recent_messages,
             has_current_image=has_current_image,
             uploaded_image_count=uploaded_image_count,
+            image_inputs=image_inputs,
         ),
     )
     return parse_conversation_turn_response(response)
@@ -137,6 +140,7 @@ def request_conversation_turn_stream(
     uploaded_image_count: int,
     previous_response_id: str | None,
     summary: str | None = None,
+    image_inputs: list[dict[str, object]] | None = None,
     base_url: str | None = None,
     client_factory: type[Any] = OpenAI,
     on_text_delta: Callable[[str], None] | None = None,
@@ -153,6 +157,7 @@ def request_conversation_turn_stream(
             recent_messages=recent_messages,
             has_current_image=has_current_image,
             uploaded_image_count=uploaded_image_count,
+            image_inputs=image_inputs,
         ),
     ) as stream:
         for event in stream:
@@ -272,7 +277,25 @@ def _conversation_turn_input(
     recent_messages: list[dict[str, str]],
     has_current_image: bool,
     uploaded_image_count: int,
-) -> list[dict[str, str]]:
+    image_inputs: list[dict[str, object]] | None = None,
+) -> list[dict[str, Any]]:
+    text_payload = json.dumps(
+        {
+            "user_message": user_message,
+            "summary": summary or "",
+            "recent_messages": recent_messages,
+            "has_current_image": has_current_image,
+            "uploaded_image_count": uploaded_image_count,
+        },
+        ensure_ascii=False,
+    )
+    user_content: str | list[dict[str, str]] = text_payload
+    image_parts = _image_input_content_parts(image_inputs or [])
+    if image_parts:
+        user_content = [
+            {"type": "input_text", "text": text_payload},
+            *image_parts,
+        ]
     return [
         {
             "role": "system",
@@ -280,18 +303,29 @@ def _conversation_turn_input(
         },
         {
             "role": "user",
-            "content": json.dumps(
-                {
-                    "user_message": user_message,
-                    "summary": summary or "",
-                    "recent_messages": recent_messages,
-                    "has_current_image": has_current_image,
-                    "uploaded_image_count": uploaded_image_count,
-                },
-                ensure_ascii=False,
-            ),
+            "content": user_content,
         },
     ]
+
+
+def _image_input_content_parts(
+    image_inputs: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    parts = []
+    for image_input in image_inputs:
+        image_bytes = image_input.get("image_bytes")
+        if not image_bytes:
+            continue
+        mime_type = str(image_input.get("mime_type") or "image/png")
+        encoded = base64.b64encode(bytes(image_bytes)).decode("ascii")
+        parts.append(
+            {
+                "type": "input_image",
+                "image_url": f"data:{mime_type};base64,{encoded}",
+                "detail": "high",
+            }
+        )
+    return parts
 
 
 def _response_output_text(response: Any) -> str:

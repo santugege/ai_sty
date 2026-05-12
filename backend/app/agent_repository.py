@@ -24,11 +24,15 @@ class AgentSessionState:
 
 
 class AgentRepository:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, user_id: uuid.UUID | None = None) -> None:
         self.db = db
+        self.user_id = user_id
 
-    def create_session(self, title: str) -> AgentSessionRow:
-        row = AgentSessionRow(title=title)
+    def create_session(
+        self, title: str, user_id: uuid.UUID | None = None
+    ) -> AgentSessionRow:
+        owner_id = self._owner_id(user_id)
+        row = AgentSessionRow(title=title, user_id=owner_id)
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
@@ -44,6 +48,7 @@ class AgentRepository:
         image_version_id: uuid.UUID | None = None,
         image_version_ids: list[uuid.UUID] | None = None,
     ) -> AgentMessageRow:
+        self._require_owned_session(session_id)
         linked_version_ids = self._valid_session_version_ids(
             session_id,
             image_version_ids
@@ -79,10 +84,15 @@ class AgentRepository:
         self.db.refresh(row)
         return row
 
-    def list_sessions(self) -> list[AgentSessionRow]:
+    def list_sessions(
+        self, user_id: uuid.UUID | None = None
+    ) -> list[AgentSessionRow]:
+        owner_id = self._owner_id(user_id)
         return list(
             self.db.scalars(
-                select(AgentSessionRow).order_by(
+                select(AgentSessionRow)
+                .where(AgentSessionRow.user_id == owner_id)
+                .order_by(
                     AgentSessionRow.updated_at.desc(),
                     AgentSessionRow.created_at.desc(),
                     AgentSessionRow.id.desc(),
@@ -91,7 +101,7 @@ class AgentRepository:
         )
 
     def update_session_summary(self, session_id: uuid.UUID, summary: str) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -100,7 +110,7 @@ class AgentRepository:
         self.db.commit()
 
     def update_session_title(self, session_id: uuid.UUID, title: str) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -110,7 +120,7 @@ class AgentRepository:
             self.db.commit()
 
     def touch_session(self, session_id: uuid.UUID) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -130,6 +140,7 @@ class AgentRepository:
         height: int | None = None,
         public_url: str | None = None,
     ) -> ImageVersionRow:
+        self._require_owned_session(session_id)
         row = ImageVersionRow(
             session_id=session_id,
             parent_version_id=parent_version_id,
@@ -150,7 +161,7 @@ class AgentRepository:
     def set_current_version(
         self, session_id: uuid.UUID, version_id: uuid.UUID
     ) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -164,7 +175,7 @@ class AgentRepository:
     def set_previous_response_id(
         self, session_id: uuid.UUID, response_id: str | None
     ) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -172,7 +183,7 @@ class AgentRepository:
         self.db.commit()
 
     def restore_version(self, session_id: uuid.UUID, version_id: uuid.UUID) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -193,7 +204,7 @@ class AgentRepository:
         restored_summary: str | None = None,
         restored_summary_updated_at: datetime | None = None,
     ) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -226,7 +237,7 @@ class AgentRepository:
         self.db.commit()
 
     def delete_session(self, session_id: uuid.UUID) -> None:
-        session = self.db.get(AgentSessionRow, session_id)
+        session = self._get_owned_session(session_id)
         if session is None:
             return
 
@@ -261,8 +272,10 @@ class AgentRepository:
         self.db.delete(session)
         self.db.commit()
 
-    def get_session_state(self, session_id: uuid.UUID) -> AgentSessionState | None:
-        session = self.db.get(AgentSessionRow, session_id)
+    def get_session_state(
+        self, session_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> AgentSessionState | None:
+        session = self._get_owned_session(session_id, user_id)
         if session is None:
             return None
 
@@ -310,6 +323,28 @@ class AgentRepository:
             versions=_order_versions_by_parent_chain(versions),
             message_image_versions=message_image_versions,
         )
+
+    def _owner_id(self, user_id: uuid.UUID | None = None) -> uuid.UUID:
+        owner_id = user_id if user_id is not None else self.user_id
+        if owner_id is None:
+            raise ValueError("AgentRepository requires a user_id.")
+        return owner_id
+
+    def _get_owned_session(
+        self, session_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> AgentSessionRow | None:
+        return self.db.scalar(
+            select(AgentSessionRow).where(
+                AgentSessionRow.id == session_id,
+                AgentSessionRow.user_id == self._owner_id(user_id),
+            )
+        )
+
+    def _require_owned_session(self, session_id: uuid.UUID) -> AgentSessionRow:
+        session = self._get_owned_session(session_id)
+        if session is None:
+            raise ValueError("Conversation not found.")
+        return session
 
     def _get_session_version(
         self, session_id: uuid.UUID, version_id: uuid.UUID

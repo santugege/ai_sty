@@ -168,7 +168,9 @@ def build_image_storage() -> MinioImageStorage:
     )
 
 
-def build_agent_service(db: Session) -> ChatGptConversationService:
+def build_agent_service(
+    db: Session, user_id: UUID | None = None
+) -> ChatGptConversationService:
     api_key = os.getenv("OPENAI_API_KEY") or ""
     image_model = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
     agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini")
@@ -212,7 +214,7 @@ def build_agent_service(db: Session) -> ChatGptConversationService:
                 image_model=image_model,
             )
         },
-        repo=AgentRepository(db),
+        repo=AgentRepository(db, user_id=user_id),
         storage=build_image_storage(),
         summarizer=summarizer,
     )
@@ -619,11 +621,11 @@ async def reset_admin_user_password(
 
 @app.get("/api/agent/sessions")
 async def list_agent_sessions(
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
-        envelope = build_agent_service(db).list_sessions()
+        envelope = build_agent_service(db, current_user.id).list_sessions()
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
@@ -633,16 +635,18 @@ async def list_agent_sessions(
 async def create_agent_session(
     message: str = Form(""),
     size: str = Form("1536x1024"),
+    quality: str = Form("auto"),
     images: list[UploadFile] | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        envelope = build_agent_service(db).create_session(
+        envelope = build_agent_service(db, current_user.id).create_session(
             message=message,
             attachments=attachments,
             size=size,
+            quality=quality,
         )
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
@@ -653,19 +657,21 @@ async def create_agent_session(
 async def create_agent_session_stream(
     message: str = Form(""),
     size: str = Form("1536x1024"),
+    quality: str = Form("auto"),
     images: list[UploadFile] | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        service = build_agent_service(db)
+        service = build_agent_service(db, current_user.id)
         return StreamingResponse(
             sse_event_stream(
                 service.stream_create_session(
                     message=message,
                     attachments=attachments,
                     size=size,
+                    quality=quality,
                 )
             ),
             media_type="text/event-stream",
@@ -677,11 +683,11 @@ async def create_agent_session_stream(
 @app.get("/api/agent/sessions/{session_id}")
 async def get_agent_session(
     session_id: UUID,
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
-        envelope = build_agent_service(db).get_session(session_id)
+        envelope = build_agent_service(db, current_user.id).get_session(session_id)
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
         return agent_error_response(error)
@@ -692,17 +698,19 @@ async def send_agent_session_message(
     session_id: UUID,
     message: str = Form(""),
     size: str = Form("1536x1024"),
+    quality: str = Form("auto"),
     images: list[UploadFile] | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        envelope = build_agent_service(db).send_session_message(
+        envelope = build_agent_service(db, current_user.id).send_session_message(
             session_id,
             message=message,
             attachments=attachments,
             size=size,
+            quality=quality,
         )
         return envelope.model_dump(mode="json")
     except (AgentInputError, AgentServiceError, Exception) as error:
@@ -714,13 +722,14 @@ async def send_agent_session_message_stream(
     session_id: UUID,
     message: str = Form(""),
     size: str = Form("1536x1024"),
+    quality: str = Form("auto"),
     images: list[UploadFile] | None = File(None),
-    _current_user: UserRow = Depends(get_current_user),
+    current_user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
         attachments = await read_conversation_uploads(images)
-        service = build_agent_service(db)
+        service = build_agent_service(db, current_user.id)
         return StreamingResponse(
             sse_event_stream(
                 service.stream_session_message(
@@ -728,6 +737,7 @@ async def send_agent_session_message_stream(
                     message=message,
                     attachments=attachments,
                     size=size,
+                    quality=quality,
                 )
             ),
             media_type="text/event-stream",

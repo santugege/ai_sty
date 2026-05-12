@@ -121,6 +121,53 @@ def test_request_conversation_turn_includes_summary_in_model_context():
     assert payload["summary"] == "User prefers clean white backgrounds."
 
 
+def test_request_conversation_turn_sends_uploaded_images_to_responses_api():
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                id="resp_vision",
+                output_text=(
+                    '{"action":"edit","assistant_message":"I can see the scene.",'
+                    '"tool_name":"chatgpt_image_edit",'
+                    '"tool_instruction":"Apply a Korean style to the visible scene."}'
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.responses = FakeResponses()
+
+    request_conversation_turn(
+        api_key="key",
+        agent_model="gpt-5.5",
+        user_message="Modify this photo into a Korean style.",
+        recent_messages=[],
+        has_current_image=True,
+        uploaded_image_count=1,
+        previous_response_id=None,
+        image_inputs=[
+            {
+                "image_bytes": b"image-bytes",
+                "mime_type": "image/png",
+            }
+        ],
+        client_factory=FakeClient,
+    )
+
+    content = calls[0]["input"][1]["content"]
+    assert content[0]["type"] == "input_text"
+    payload = json.loads(content[0]["text"])
+    assert payload["user_message"] == "Modify this photo into a Korean style."
+    assert content[1] == {
+        "type": "input_image",
+        "image_url": "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+        "detail": "high",
+    }
+
+
 def test_request_conversation_turn_requests_structured_json_output():
     calls = []
 

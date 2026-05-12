@@ -10,6 +10,9 @@ from app.agent_models import AgentMessageImageVersionRow, AgentSessionRow, Image
 from app.agent_repository import AgentRepository
 from app.db import Base
 
+USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+OTHER_USER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+
 
 def test_set_previous_response_id_accepts_none():
     signature = inspect.signature(
@@ -23,7 +26,49 @@ def make_repo() -> AgentRepository:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = Session(engine)
-    return AgentRepository(session)
+    return AgentRepository(session, user_id=USER_ID)
+
+
+def test_list_sessions_filters_by_owner_user_id():
+    repo = make_repo()
+    owned = repo.create_session("Owned", user_id=USER_ID)
+    repo.create_session("Other", user_id=OTHER_USER_ID)
+
+    sessions = repo.list_sessions(USER_ID)
+
+    assert [session.id for session in sessions] == [owned.id]
+
+
+def test_get_session_state_requires_owner_user_id():
+    repo = make_repo()
+    session = repo.create_session("Private", user_id=USER_ID)
+
+    assert repo.get_session_state(session.id, user_id=OTHER_USER_ID) is None
+
+
+def test_add_message_rejects_session_owned_by_another_user():
+    repo = make_repo()
+    session = repo.create_session("Private", user_id=USER_ID)
+    other_repo = AgentRepository(repo.db, user_id=OTHER_USER_ID)
+
+    with pytest.raises(ValueError, match="Conversation not found"):
+        other_repo.add_message(session.id, role="user", content="cross-user write")
+
+
+def test_add_image_version_rejects_session_owned_by_another_user():
+    repo = make_repo()
+    session = repo.create_session("Private", user_id=USER_ID)
+    other_repo = AgentRepository(repo.db, user_id=OTHER_USER_ID)
+
+    with pytest.raises(ValueError, match="Conversation not found"):
+        other_repo.add_image_version(
+            session_id=session.id,
+            parent_version_id=None,
+            storage_key="agent-sessions/private/v1.png",
+            mime_type="image/png",
+            prompt="cross-user image",
+            model="user-upload",
+        )
 
 
 def test_list_sessions_orders_by_recent_update():
@@ -32,12 +77,14 @@ def test_list_sessions_orders_by_recent_update():
     second_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
     first = AgentSessionRow(
         id=first_id,
+        user_id=USER_ID,
         title="First",
         created_at=datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc),
     )
     second = AgentSessionRow(
         id=second_id,
+        user_id=USER_ID,
         title="Second",
         created_at=datetime(2026, 5, 10, 9, 0, tzinfo=timezone.utc),
         updated_at=datetime(2026, 5, 10, 9, 0, tzinfo=timezone.utc),
@@ -57,12 +104,14 @@ def test_list_sessions_uses_id_tiebreaker_when_timestamps_match():
     same_time = datetime(2026, 5, 10, 8, 0, tzinfo=timezone.utc)
     lower = AgentSessionRow(
         id=lower_id,
+        user_id=USER_ID,
         title="Lower",
         created_at=same_time,
         updated_at=same_time,
     )
     higher = AgentSessionRow(
         id=higher_id,
+        user_id=USER_ID,
         title="Higher",
         created_at=same_time,
         updated_at=same_time,
