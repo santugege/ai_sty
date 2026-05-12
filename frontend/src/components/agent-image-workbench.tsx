@@ -57,6 +57,12 @@ type SelectedImage = {
   previewUrl: string;
 };
 
+type SubmitAgentMessageOptions = {
+  event?: FormEvent<HTMLFormElement>;
+  messageOverride?: string;
+  imagesOverride?: SelectedImage[];
+};
+
 const agentLoadingPhrases = ["生成图片", "添加细节", "润色画面", "保存图片"] as const;
 const imageQualityLabels: Record<ImageQuality, string> = {
   auto: "自动质量",
@@ -381,9 +387,8 @@ export function AgentImageWorkbench({
       return;
     }
 
-    setMessage(previousUserMessage.content);
     setError("");
-    focusComposer();
+    void submitAgentMessage({ messageOverride: previousUserMessage.content });
   }
 
   function handleContinueEditingImage(image: ConversationImage) {
@@ -407,14 +412,20 @@ export function AgentImageWorkbench({
     setError("已停止生成。");
   }
 
-  async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
+  async function submitAgentMessage({
+    event,
+    messageOverride,
+    imagesOverride,
+  }: SubmitAgentMessageOptions = {}) {
     event?.preventDefault();
-    if (!canSubmit) {
+    const draftMessage = messageOverride ?? message;
+    const draftImages = imagesOverride ?? selectedImages;
+    const canSend =
+      !isSubmitting && (draftMessage.trim().length > 0 || draftImages.length > 0);
+    if (!canSend) {
       return;
     }
 
-    const draftMessage = message;
-    const draftImages = selectedImages;
     const formData = new FormData();
     formData.append("message", draftMessage);
     formData.append("size", size);
@@ -541,6 +552,10 @@ export function AgentImageWorkbench({
         setIsAwaitingAgentResponse(false);
       }
     }
+  }
+
+  async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
+    await submitAgentMessage({ event });
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {

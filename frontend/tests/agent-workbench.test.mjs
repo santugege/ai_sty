@@ -279,8 +279,8 @@ test("agent workbench sends configurable image quality and shared product sizes"
 test("agent workbench shows receiving state in the message stream after submit", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
 
-  assert.match(source, /const draftMessage = message/);
-  assert.match(source, /const draftImages = selectedImages/);
+  assert.match(source, /const draftMessage = messageOverride \?\? message/);
+  assert.match(source, /const draftImages = imagesOverride \?\? selectedImages/);
   assert.match(source, /pendingUserMessage/);
   assert.match(source, /createPendingUserMessage/);
   assert.match(source, /setPendingUserMessage\(createPendingUserMessage\(draftMessage, draftImages\)\)/);
@@ -340,6 +340,18 @@ test("agent workbench exposes ChatGPT-style message actions", () => {
   assert.match(source, /复制/);
   assert.match(source, /编辑再发/);
   assert.match(source, /重新生成/);
+});
+
+test("agent workbench regenerate immediately resubmits the previous user message", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+  const regenerateBlock = source.slice(
+    source.indexOf("function handleRegenerateMessage"),
+    source.indexOf("function handleContinueEditingImage"),
+  );
+
+  assert.match(source, /submitAgentMessage/);
+  assert.match(regenerateBlock, /void submitAgentMessage\(\{ messageOverride: previousUserMessage\.content \}\)/);
+  assert.doesNotMatch(regenerateBlock, /setMessage\(previousUserMessage\.content\)/);
 });
 
 test("agent workbench can stop a streaming generation request", () => {

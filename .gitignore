@@ -4,6 +4,7 @@ node_modules/
 out/
 coverage/
 .env
+.env.production
 .env.local
 .env.*.local
 frontend/node_modules/
