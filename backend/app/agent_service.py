@@ -55,11 +55,11 @@ class _PersistentImageSource:
     name: str
 
 
-MAX_AGENT_IMAGE_COUNT = 4
+MAX_AGENT_IMAGE_COUNT = 10
 _IMAGE_COUNT_UNITS = "\u5f20\u5f35\u5e45\u4e2a\u500b\u6b3e\u7248\u79cd\u7a2e"
-_HAN_IMAGE_COUNT_DIGITS = "\u4e00\u4e8c\u4e24\u5169\u4e09\u56db"
+_HAN_IMAGE_COUNT_DIGITS = "\u4e00\u4e8c\u4e24\u5169\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341"
 _ARABIC_IMAGE_COUNT_PATTERN = re.compile(
-    rf"(?<!\d)([1-4])\s*(?:[{_IMAGE_COUNT_UNITS}]|poses?|images?|photos?|pictures?)",
+    rf"(?<!\d)(10|[1-9])\s*(?:[{_IMAGE_COUNT_UNITS}]|poses?|images?|photos?|pictures?)",
     re.IGNORECASE,
 )
 _HAN_IMAGE_COUNT_PATTERN = re.compile(
@@ -72,6 +72,12 @@ _HAN_IMAGE_COUNT_MAP = {
     "\u5169": 2,
     "\u4e09": 3,
     "\u56db": 4,
+    "\u4e94": 5,
+    "\u516d": 6,
+    "\u4e03": 7,
+    "\u516b": 8,
+    "\u4e5d": 9,
+    "\u5341": 10,
 }
 
 
