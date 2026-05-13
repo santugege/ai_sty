@@ -342,6 +342,17 @@ test("agent workbench exposes ChatGPT-style message actions", () => {
   assert.match(source, /重新生成/);
 });
 
+test("agent workbench accepts images pasted into the composer", () => {
+  const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
+
+  assert.match(source, /function handleComposerPaste/);
+  assert.match(source, /event\.clipboardData\.files/);
+  assert.match(source, /file\.type\.startsWith\("image\/"\)/);
+  assert.match(source, /event\.preventDefault\(\)/);
+  assert.match(source, /handleImages\(imageFiles\)/);
+  assert.match(source, /onPaste=\{handleComposerPaste\}/);
+});
+
 test("agent workbench regenerate immediately resubmits the previous user message", () => {
   const source = readFileSync("src/components/agent-image-workbench.tsx", "utf8");
   const regenerateBlock = source.slice(

@@ -8,6 +8,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ClipboardEvent,
 } from "react";
 import {
   AlertCircle,
@@ -267,7 +268,7 @@ export function AgentImageWorkbench({
     return () => window.clearInterval(timer);
   }, [isAwaitingAgentResponse]);
 
-  function handleImages(files: FileList | null) {
+  function handleImages(files: FileList | File[] | null) {
     const nextImages = Array.from(files ?? []).map((file) => ({
       id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
       file,
@@ -284,6 +285,18 @@ export function AgentImageWorkbench({
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  }
+
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles = Array.from(event.clipboardData.files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    handleImages(imageFiles);
   }
 
   function focusComposer() {
@@ -772,6 +785,7 @@ export function AgentImageWorkbench({
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
+                onPaste={handleComposerPaste}
                 rows={3}
                 disabled={isSubmitting}
                 placeholder="询问或描述要怎么编辑图片"
